@@ -1,93 +1,159 @@
-# SingBox 桌面控制台（Electron）
+# 网络连接助手（v3_electron）
 
-本目录提供基于 Electron 的桌面控制程序，用于统一管理发送端与接收端服务。
+这是当前在持续开发的 Electron 桌面端项目。
 
-## 功能说明
-- 支持发送端与接收端统一控制界面
-- 支持发送端独立程序与接收端独立程序
-- 支持服务一键启动、停止与运行日志查看
-- 自动保存参数并在运行时生成配置文件
-- Windows 支持便携式单文件分发
-- 内置协作通信界面（登录、在线成员、实时聊天）
+项目目标：
+- 提供 `Sender` 和 `Receiver` 两套独立运行模式
+- 在桌面端统一管理连接设置、运行状态、日志和账号协作功能
+- 支持 Windows 便携分发
 
-## 运行环境
-- Node.js 20+（包含 npm）
+## 目录说明
+- `src/`
+  - Electron 主进程、预加载脚本、渲染层页面与样式
+- `build/bin/`
+  - 运行所需二进制，当前已纳入 Git
+  - 包含 `sing-box.exe`、`frpc.exe`
+- `scripts/prepare-assets.mjs`
+  - 启动和打包前执行
+  - 优先复用仓库内 `build/bin/` 的二进制
+- `collab_server/`
+  - 账号登录、在线状态、联系人列表、聊天消息所需的服务端
 
-安装依赖：
+## 已提交到 Git 的必要内容
+当前仓库已经包含跨设备开发必需文件：
+- 前端和主进程源码
+- Electron 构建配置
+- Windows 启动脚本和打包脚本
+- `build/bin/` 中的运行二进制
+- 协作服务端源码
 
+不会进入 Git 的内容：
+- `node_modules/`
+- `release/`、`release_sender/`、`release_receiver/`
+- `collab_server/node_modules/`
+- `collab_server/data/`
+- 日志文件和临时打包文件
+
+## 新设备开发准备
+### 1. 拉取仓库
 ```bash
+git clone git@github.com:Sjeary/singbox-client.git
+cd singbox-client
+```
+
+### 2. 安装桌面端依赖
+```bash
+cd v3_electron
 npm install
 ```
 
-## 开发启动
-- 统一界面模式：
+### 3. 如需协作服务端，再安装服务端依赖
+```bash
+cd collab_server
+npm install
+```
 
+## 运行环境
+- Node.js 20+
+- npm 10+ 推荐
+- Windows 开发环境优先
+
+## 开发启动
+### Windows 脚本
+- Sender 开发模式：
+```bat
+start_dev_windows.bat
+```
+
+- Receiver 开发模式：
+```bat
+start_receiver_dev_windows.bat
+```
+
+- Sender 专用脚本：
+```bat
+start_sender_dev_windows.bat
+```
+
+### npm 命令
+- 统一入口：
 ```bash
 npm run dev
 ```
 
-- 发送端模式：
-
+- Sender：
 ```bash
 npm run dev:sender
 ```
 
-- 接收端模式：
-
+- Receiver：
 ```bash
 npm run dev:receiver
 ```
 
-## Windows 打包
-- 统一界面便携包：
+## 当前界面结构
+### Sender
+- `连接设置`
+- `运行记录`
+- `账号与信息`
+- `联系人与聊天`
 
+未登录时只显示登录页。
+
+### Receiver
+- `接收端设置`
+- `运行记录`
+
+Receiver 不混入 Sender 的账号和聊天页面。
+
+## 打包
+### Windows 便携包
+- 统一界面：
 ```bash
 npm run dist:win
 ```
 
-- 发送端便携包：
-
+- Sender 单独分发：
 ```bash
 npm run dist:win:sender
 ```
 
-- 接收端便携包：
-
+- Receiver 单独分发：
 ```bash
 npm run dist:win:receiver
 ```
 
-- 同时构建发送端与接收端：
-
+- 同时打包 Sender 和 Receiver：
 ```bash
 npm run dist:win:split
 ```
 
-输出目录：
-- 统一界面：`release/`
-- 发送端：`release_sender/`
-- 接收端：`release_receiver/`
-
-## 脚本入口（Windows）
-- `start_dev_windows.bat`
+### 常用 Windows 打包脚本
 - `build_win_portable.bat`
 - `build_win_sender.bat`
 - `build_win_receiver.bat`
 - `build_win_split.bat`
 
-## 发送端模式约束
-- 发送端独立模式下，目标域名使用内置默认集合，不提供编辑入口。
+### 输出目录
+- `release/`
+- `release_sender/`
+- `release_receiver/`
 
-## 二进制准备规则
-打包前会执行 `prepare:assets`，按优先级自动准备可执行文件：
-1. `v2/assets/<platform>/`
-2. Windows 兜底：根目录 `sing-box.exe` 与 `frp_0.65.0_windows_amd64/frpc.exe`
+## 资源文件说明
+运行和打包前会执行 `prepare-assets`。
 
-## 协作通信服务器
-- 服务端目录：`collab_server/`
-- 用于账号认证、在线状态同步与聊天广播
-- 快速启动：
+当前优先级：
+1. `build/bin/`
+2. 外部历史目录 `v2/assets/<platform>/`
+3. 其他兜底路径
 
+因为 `build/bin/` 已进仓库，所以在其他设备上通常不需要再手工复制 `sing-box` 和 `frpc`。
+
+## 协作服务端
+服务端目录：
+- `collab_server/`
+
+快速启动：
 ```bash
 cd collab_server
 npm install
@@ -95,4 +161,36 @@ node add_user.js admin MyStrongPass123
 npm start
 ```
 
-客户端服务地址示例：`http://你的公网IP:8088`
+客户端服务地址示例：
+```text
+http://你的服务器IP:8088
+```
+
+更完整的部署说明见：
+- `collab_server/README.md`
+
+## Git 工作流
+### 查看状态
+```bash
+git status
+```
+
+### 提交修改
+```bash
+git add .
+git commit -m "说明这次改了什么"
+```
+
+### 推送
+```bash
+git push
+```
+
+## 当前仓库远端
+```text
+git@github.com:Sjeary/singbox-client.git
+```
+
+## 备注
+- 当前仓库已经推送到远端 `main`
+- 如果在新设备上使用 SSH 推送，需要先完成 GitHub SSH key 配置
