@@ -238,6 +238,14 @@
                   </label>
                 </div>
 
+                <label class="option-row remember-option" for="c_remember_password">
+                  <input id="c_remember_password" type="checkbox" />
+                  <div class="option-copy">
+                    <strong>记住密码</strong>
+                    <span>下次打开时自动填入当前账号密码</span>
+                  </div>
+                </label>
+
                 <div class="actions collab-actions">
                   <button class="primary" id="btnCollabLogin">登录</button>
                   <button id="btnCollabLogout">退出</button>
@@ -290,10 +298,13 @@
                       <strong>当前房间</strong>
                       <span id="c_room_channel_scope">房间：-</span>
                     </div>
+                    <span class="unread-badge room-unread-badge" id="c_room_unread" hidden>0</span>
                   </button>
 
+                  <button class="chat-settings-trigger" id="btnOpenMessageSettings" type="button">消息设置</button>
+
                   <div class="chat-list-head">
-                    <span>在线联系人</span>
+                    <span>联系人</span>
                     <small id="c_online_count">0 人</small>
                   </div>
 
@@ -333,6 +344,168 @@
                 </section>
               </div>
             </section>
+
+            <section class="panel glass view-panel settings-panel" id="messageSettingsPanel" data-view-panel="message-settings">
+              <div class="panel-header">
+                <p>在这里控制收到消息时的提醒方式，不会直接占用聊天主页面。</p>
+                <button id="btnBackToChat">返回聊天</button>
+              </div>
+
+              <div class="settings-layout">
+                <article class="settings-card">
+                  <div class="settings-card-head">
+                    <strong>消息提醒</strong>
+                    <span>控制右上角弹出的消息提示</span>
+                  </div>
+
+                  <label class="option-row settings-option" for="c_notify_message_popup">
+                    <input id="c_notify_message_popup" type="checkbox" />
+                    <div class="option-copy">
+                      <strong>收到消息时提醒</strong>
+                      <span>当你当前没有看这个会话时，在右上角显示消息提示。</span>
+                    </div>
+                  </label>
+
+                  <label class="option-row settings-option" for="c_notify_user_online">
+                    <input id="c_notify_user_online" type="checkbox" />
+                    <div class="option-copy">
+                      <strong>联系人上线时提醒</strong>
+                      <span>当有联系人刚刚上线时，在右上角显示上线提示。</span>
+                    </div>
+                  </label>
+                </article>
+
+                <article class="settings-card">
+                  <div class="settings-card-head">
+                    <strong>说明</strong>
+                    <span>当前提醒规则</span>
+                  </div>
+
+                  <div class="settings-note-list">
+                    <div class="tip-item">如果你正在聊天页面里看着当前会话，新消息不会重复弹提醒。</div>
+                    <div class="tip-item">如果切到别的联系人、别的房间，或者程序不在前台，新消息会计入未读并按设置提醒。</div>
+                    <div class="tip-item">未读数量会显示在房间或联系人右侧，最多显示为 99+。</div>
+                  </div>
+                </article>
+              </div>
+            </section>
+
+            <section class="panel glass view-panel gpt-panel" id="gptPanel" data-view-panel="gpt">
+              <div class="gpt-browser-shell" id="gptBrowserShell">
+                <div class="gpt-browser-toolbar">
+                  <div class="gpt-toolbar-group">
+                    <button class="toolbar-btn" id="btnGptBack">后退</button>
+                    <button class="toolbar-btn" id="btnGptForward">前进</button>
+                    <button class="toolbar-btn" id="btnGptReload">刷新</button>
+                  </div>
+
+                  <div class="gpt-toolbar-meta">
+                    <span class="gpt-toolbar-pill">
+                      <em>代理</em>
+                      <strong id="gptProxyInfo">SOCKS5 127.0.0.1:19872</strong>
+                    </span>
+
+                    <span class="gpt-toolbar-pill">
+                      <em>状态</em>
+                      <strong id="gptRuntimeState">等待打开</strong>
+                    </span>
+
+                    <span class="gpt-toolbar-pill">
+                      <em>我的提问</em>
+                      <strong id="gptMyQueryCount">0</strong>
+                    </span>
+                  </div>
+
+                  <div class="gpt-toolbar-group gpt-toolbar-actions">
+                    <button class="toolbar-btn" id="btnGptGoStats">使用统计</button>
+                    <button class="toolbar-btn" id="btnGptOpenExternal">浏览器打开</button>
+                    <button class="toolbar-btn" id="btnGptToggleFullscreen">全屏</button>
+                  </div>
+                </div>
+
+                <div class="gpt-browser-content">
+                  <div class="gpt-browser-overlay" id="gptOverlay">
+                    <strong id="gptOverlayTitle">准备打开 GPT</strong>
+                    <p id="gptOverlayText">请先开启发送服务，确保本地代理端口可用，然后再进入 GPT 工作区。</p>
+                  </div>
+
+                  <webview id="gptWebview" class="gpt-webview" partition="persist:gpt-chat" allowpopups="false"></webview>
+                </div>
+              </div>
+
+              <p class="panel-feedback" id="gpt_feedback" hidden></p>
+            </section>
+
+            <section class="panel glass view-panel gpt-stats-panel" id="gptStatsPanel" data-view-panel="gpt-stats">
+              <div class="panel-header">
+                <p>按时间范围查看所有账号使用 GPT 的次数分布。你可以看到总提问量、当前账号在该范围内的次数，以及各账号占比。</p>
+                <button id="btnBackToGpt">返回 GPT</button>
+              </div>
+
+              <div class="gpt-stats-filter">
+                <div class="gpt-range-fields">
+                  <label class="compact-control">
+                    <span>时间范围</span>
+                    <select id="gptStatsPreset">
+                      <option value="7d">最近 7 天</option>
+                      <option value="30d">最近 30 天</option>
+                      <option value="90d">最近 90 天</option>
+                      <option value="all">全部时间</option>
+                      <option value="custom">自定义</option>
+                    </select>
+                  </label>
+
+                  <label class="compact-control">
+                    <span>开始日期</span>
+                    <input id="gptStatsFrom" type="date" />
+                  </label>
+
+                  <label class="compact-control">
+                    <span>结束日期</span>
+                    <input id="gptStatsTo" type="date" />
+                  </label>
+                </div>
+
+                <div class="actions">
+                  <button class="primary" id="btnGptApplyRange">查询统计</button>
+                </div>
+              </div>
+
+              <p class="gpt-range-note" id="gptStatsRangeNote">当前统计范围：最近 30 天</p>
+
+              <div class="gpt-summary">
+                <article class="summary-card">
+                  <span class="summary-label">所选范围总提问数</span>
+                  <strong id="gptTotalQueries">0</strong>
+                </article>
+
+                <article class="summary-card">
+                  <span class="summary-label">当前账号在此范围</span>
+                  <strong id="gptCurrentUserQueries">0</strong>
+                </article>
+
+                <article class="summary-card">
+                  <span class="summary-label">有记录的账号数</span>
+                  <strong id="gptUserCount">0</strong>
+                </article>
+              </div>
+
+              <div class="gpt-stats-layout">
+                <article class="gpt-chart-card">
+                  <h3>使用占比</h3>
+                  <div class="gpt-pie-chart" id="gptPieChart">
+                    <span id="gptPieCenter">暂无数据</span>
+                  </div>
+                </article>
+
+                <article class="gpt-chart-card">
+                  <h3>账号明细</h3>
+                  <div class="gpt-stats-legend" id="gptStatsLegend"></div>
+                </article>
+              </div>
+
+              <p class="panel-feedback" id="gpt_stats_feedback" hidden></p>
+            </section>
           </div>
 
           <aside class="view-menu glass no-drag">
@@ -356,15 +529,26 @@
               <small>登录与资料</small>
             </button>
 
+            <button class="view-nav-btn gpt-nav-btn" data-view-target="gpt">
+              <span>GPT 工作区</span>
+              <small>应用内网页</small>
+            </button>
+
             <button class="view-nav-btn" data-view-target="chat">
               <span>联系人与聊天</span>
               <small>会话窗口</small>
+            </button>
+
+            <button class="view-nav-btn" data-view-target="gpt-stats">
+              <span>GPT 使用统计</span>
+              <small>全体用户</small>
             </button>
           </aside>
         </div>
       </main>
     </div>
 
+    <div id="toastStack" class="toast-stack" aria-live="polite"></div>
     <div id="appContextMenu" class="app-context-menu" hidden></div>
 
     <script src="./renderer.js"></script>

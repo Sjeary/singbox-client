@@ -5,6 +5,7 @@ const state = {
   view: "sender",
   deviceInfo: null,
   contextMenuOpen: false,
+  windowFocused: typeof document !== "undefined" ? document.hasFocus() : true,
   collab: {
     serverUrl: "",
     username: "",
@@ -16,6 +17,38 @@ const state = {
     roomScope: "-",
     userDirectory: [],
     pinnedUsers: new Set(),
+    rememberPassword: false,
+    savedPassword: "",
+    notifyMessagePopup: true,
+    notifyUserOnline: false,
+    messagesByConversation: new Map(),
+    unreadByConversation: new Map(),
+    knownOnlineUsers: new Set(),
+    presenceReady: false,
+  },
+  gpt: {
+    partition: "persist:gpt-chat",
+    homeUrl: "https://chatgpt.com/",
+    lastUrl: "https://chatgpt.com/",
+    proxyHost: "127.0.0.1",
+    proxyPort: "19872",
+    totalQueries: 0,
+    queryUsers: {},
+    statsTotalQueries: 0,
+    statsUsers: {},
+    statsEntries: [],
+    statsUserCount: 0,
+    statsFrom: "",
+    statsTo: "",
+    statsPreset: "30d",
+    webviewInitialized: false,
+    webviewListenersBound: false,
+    webviewLoading: false,
+    sessionPreparedFor: "",
+    lastTrackedQueryText: "",
+    lastTrackedQueryAt: 0,
+    canGoBack: false,
+    canGoForward: false,
   },
 };
 
@@ -29,6 +62,11 @@ const DEFAULT_TARGET_DOMAINS = [
   "cloudflare.com",
   "wp.com",
 ].join(",");
+
+const GPT_ALLOWED_HOSTS = DEFAULT_TARGET_DOMAINS.split(",").map((item) => item.trim()).filter(Boolean);
+const GPT_QUERY_MARKER = "__GPT_QUERY__";
+const GPT_PROXY_HOST = "127.0.0.1";
+const GPT_PROXY_PORT = "19872";
 
 const SOURCE_LABELS = {
   app: "系统",
@@ -86,6 +124,7 @@ function setRoomScope(scopeText) {
   state.collab.roomScope = roomScope;
   if (el("c_room_scope")) el("c_room_scope").textContent = roomScope;
   if (el("c_room_channel_scope")) el("c_room_channel_scope").textContent = `房间：${roomScope}`;
+  updateRoomUnreadBadge();
 }
 
 function syncAccountOverview() {
@@ -165,6 +204,711 @@ function formatTime(ts) {
   return Number.isNaN(d.getTime()) ? new Date().toLocaleTimeString() : d.toLocaleTimeString();
 }
 
+function currentGptUser() {
+  return safeText(state.collab.username) || "未登录账号";
+}
+
+function gptTotalQueries() {
+  const derived = Object.values(state.gpt.queryUsers || {}).reduce((sum, value) => sum + (Number(value) || 0), 0);
+  return Math.max(Number(state.gpt.totalQueries) || 0, derived);
+}
+
+function currentGptUserQueries() {
+  return Number(state.gpt.queryUsers[currentGptUser()] || 0);
+}
+
+function currentGptStatsUserQueries() {
+  return Number(state.gpt.statsUsers[currentGptUser()] || 0);
+}
+
+function formatDateInputValue(date) {
+  const year = date.getUTCFullYear();
+  const month = String(date.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(date.getUTCDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function setGptStatsPreset(preset) {
+  const now = new Date();
+  const today = formatDateInputValue(now);
+
+  if (preset === "all") {
+    state.gpt.statsPreset = "all";
+    state.gpt.statsFrom = "";
+    state.gpt.statsTo = "";
+    return;
+  }
+
+  const daysMap = { "7d": 7, "30d": 30, "90d": 90 };
+  const days = daysMap[preset] || 30;
+  const start = new Date(now);
+  start.setUTCDate(start.getUTCDate() - (days - 1));
+
+  state.gpt.statsPreset = preset in daysMap ? preset : "30d";
+  state.gpt.statsFrom = formatDateInputValue(start);
+  state.gpt.statsTo = today;
+}
+
+function syncGptStatsFilterInputs() {
+  if (el("gptStatsPreset")) el("gptStatsPreset").value = state.gpt.statsPreset;
+  if (el("gptStatsFrom")) {
+    el("gptStatsFrom").value = state.gpt.statsFrom;
+    el("gptStatsFrom").disabled = state.gpt.statsPreset !== "custom";
+  }
+  if (el("gptStatsTo")) {
+    el("gptStatsTo").value = state.gpt.statsTo;
+    el("gptStatsTo").disabled = state.gpt.statsPreset !== "custom";
+  }
+}
+
+function readGptStatsRangeFromInputs() {
+  const preset = safeText(el("gptStatsPreset")?.value) || state.gpt.statsPreset || "30d";
+  state.gpt.statsPreset = preset;
+
+  if (preset !== "custom") {
+    setGptStatsPreset(preset);
+  } else {
+    state.gpt.statsFrom = safeText(el("gptStatsFrom")?.value);
+    state.gpt.statsTo = safeText(el("gptStatsTo")?.value);
+  }
+
+  syncGptStatsFilterInputs();
+}
+
+function resolveGptProxyPort() {
+  const value = safeText(el("s_socks_listen_port")?.value || state.settings?.sender?.socks_listen_port || state.gpt.proxyPort || GPT_PROXY_PORT);
+  return /^\d+$/.test(value) ? value : GPT_PROXY_PORT;
+}
+
+function isGptAllowedUrl(rawUrl) {
+  try {
+    const url = new URL(String(rawUrl || ""));
+    if (!/^https?:$/i.test(url.protocol)) return false;
+    return GPT_ALLOWED_HOSTS.some((host) => url.hostname === host || url.hostname.endsWith(`.${host}`));
+  } catch {
+    return false;
+  }
+}
+
+function normalizeGptUrl(rawUrl) {
+  const url = safeText(rawUrl);
+  if (url && isGptAllowedUrl(url)) {
+    return url;
+  }
+  return state.gpt.homeUrl;
+}
+
+function gptUserAgent() {
+  return String(window.navigator.userAgent || "").replace(/\s*Electron\/[^\s]+/i, "");
+}
+
+function setGptFeedback(text = "", tone = "") {
+  setPanelFeedback("gpt_feedback", text, tone);
+}
+
+function setGptStatsFeedback(text = "", tone = "") {
+  setPanelFeedback("gpt_stats_feedback", text, tone);
+}
+
+function formatGptStatsRangeText() {
+  const from = safeText(state.gpt.statsFrom);
+  const to = safeText(state.gpt.statsTo);
+
+  if (!from && !to) {
+    return "当前统计范围：全部时间";
+  }
+  if (from && to) {
+    return `当前统计范围：${from} 至 ${to}`;
+  }
+  if (from) {
+    return `当前统计范围：${from} 之后`;
+  }
+  return `当前统计范围：截至 ${to}`;
+}
+
+function syncGptFullscreenState() {
+  const shell = el("gptBrowserShell");
+  const isFullscreen = Boolean(shell && document.fullscreenElement === shell);
+
+  if (el("btnGptToggleFullscreen")) {
+    el("btnGptToggleFullscreen").textContent = isFullscreen ? "退出全屏" : "全屏";
+  }
+}
+
+function updateGptNavState() {
+  const webview = el("gptWebview");
+  let canGoBack = false;
+  let canGoForward = false;
+
+  if (webview && state.gpt.webviewInitialized) {
+    try {
+      canGoBack = typeof webview.canGoBack === "function" && webview.canGoBack();
+    } catch {
+      canGoBack = false;
+    }
+    try {
+      canGoForward = typeof webview.canGoForward === "function" && webview.canGoForward();
+    } catch {
+      canGoForward = false;
+    }
+  }
+
+  state.gpt.canGoBack = Boolean(canGoBack);
+  state.gpt.canGoForward = Boolean(canGoForward);
+
+  if (el("btnGptBack")) el("btnGptBack").disabled = !state.gpt.canGoBack;
+  if (el("btnGptForward")) el("btnGptForward").disabled = !state.gpt.canGoForward;
+  if (el("btnGptReload")) el("btnGptReload").disabled = !Boolean(state.status?.senderRunning);
+  if (el("btnGptOpenExternal")) {
+    el("btnGptOpenExternal").disabled = !safeText(state.gpt.lastUrl) && !(webview && safeText(webview.getURL?.()));
+  }
+
+  syncGptFullscreenState();
+}
+
+function updateGptProxyInfo() {
+  state.gpt.proxyPort = resolveGptProxyPort();
+  if (el("gptProxyInfo")) {
+    el("gptProxyInfo").textContent = `SOCKS5 ${state.gpt.proxyHost}:${state.gpt.proxyPort}`;
+  }
+}
+
+function updateGptRuntimeState() {
+  const runtimeNode = el("gptRuntimeState");
+  const overlay = el("gptOverlay");
+  const overlayTitle = el("gptOverlayTitle");
+  const overlayText = el("gptOverlayText");
+  const senderRunning = Boolean(state.status?.senderRunning);
+
+  if (runtimeNode) {
+    if (!senderRunning) {
+      runtimeNode.textContent = "等待发送服务";
+    } else if (state.gpt.webviewLoading) {
+      runtimeNode.textContent = "正在加载";
+    } else if (state.gpt.webviewInitialized) {
+      runtimeNode.textContent = "已打开";
+    } else {
+      runtimeNode.textContent = "准备打开";
+    }
+  }
+
+  updateGptNavState();
+
+  if (!overlay || !overlayTitle || !overlayText) return;
+
+  if (!senderRunning) {
+    overlay.hidden = false;
+    overlayTitle.textContent = "请先开启发送服务";
+    overlayText.textContent = `GPT 工作区会通过 ${state.gpt.proxyHost}:${state.gpt.proxyPort} 代理访问。请先在“连接设置”里开启发送服务。`;
+    return;
+  }
+
+  if (!state.gpt.webviewInitialized) {
+    overlay.hidden = false;
+    overlayTitle.textContent = "准备打开 GPT";
+    overlayText.textContent = "正在初始化内置 Chromium 页面并接入本地代理。第一次进入会稍慢一些。";
+    return;
+  }
+
+  overlay.hidden = true;
+}
+
+function renderGptStats() {
+  const totalNode = el("gptTotalQueries");
+  const currentNode = el("gptCurrentUserQueries");
+  const userCountNode = el("gptUserCount");
+  const pie = el("gptPieChart");
+  const center = el("gptPieCenter");
+  const legend = el("gptStatsLegend");
+  const rangeNode = el("gptStatsRangeNote");
+  const rawEntries = Array.isArray(state.gpt.statsEntries) && state.gpt.statsEntries.length
+    ? state.gpt.statsEntries
+    : Object.entries(state.gpt.statsUsers || {}).map(([username, count]) => ({ username, count }));
+  const entries = rawEntries
+    .map((item) => ({
+      username: safeText(item?.username),
+      displayName: safeText(item?.displayName),
+      count: Number(item?.count) || 0,
+    }))
+    .filter((item) => item.username && item.count > 0)
+    .sort((a, b) => b.count - a.count || a.username.localeCompare(b.username));
+
+  const total = Number(state.gpt.statsTotalQueries) || 0;
+  const current = currentGptStatsUserQueries();
+
+  if (totalNode) totalNode.textContent = String(total);
+  if (currentNode) currentNode.textContent = String(current);
+  if (userCountNode) userCountNode.textContent = String(state.gpt.statsUserCount || entries.length);
+  if (rangeNode) rangeNode.textContent = formatGptStatsRangeText();
+  if (!pie || !center || !legend) return;
+
+  legend.textContent = "";
+
+  if (!entries.length || total <= 0) {
+    pie.style.setProperty("--pie-fill", "conic-gradient(rgba(148, 163, 184, 0.18) 0deg 360deg)");
+    center.textContent = "暂无统计";
+
+    const empty = document.createElement("div");
+    empty.className = "gpt-legend-empty";
+    empty.textContent = "当前时间范围内还没有 GPT 提问记录。调整时间范围或继续使用后，这里会显示所有账号的占比。";
+    legend.appendChild(empty);
+    return;
+  }
+
+  const colors = ["#0a84ff", "#f59e0b", "#fb7185", "#22c55e", "#a855f7", "#14b8a6", "#f97316", "#eab308"];
+  let start = 0;
+  const segments = [];
+
+  entries.forEach((item, index) => {
+    const count = item.count;
+    const slice = (count / total) * 360;
+    const end = start + slice;
+    segments.push(`${colors[index % colors.length]} ${start.toFixed(2)}deg ${end.toFixed(2)}deg`);
+    start = end;
+  });
+
+  pie.style.setProperty("--pie-fill", `conic-gradient(${segments.join(", ")})`);
+  center.textContent = `总计 ${total} 次`;
+
+  entries.forEach((item, index) => {
+    const username = item.username;
+    const count = item.count;
+    const displayName = item.displayName && item.displayName !== username
+      ? `${item.displayName} (${username})`
+      : (item.displayName || username);
+    const row = document.createElement("div");
+    row.className = "gpt-legend-item";
+
+    const swatch = document.createElement("span");
+    swatch.className = "gpt-legend-swatch";
+    swatch.style.background = colors[index % colors.length];
+
+    const copy = document.createElement("div");
+    copy.className = "gpt-legend-copy";
+
+    const name = document.createElement("strong");
+    name.textContent = displayName;
+
+    const detail = document.createElement("span");
+    detail.textContent = `${Math.round((count / total) * 100)}% · ${count} 次提问`;
+
+    const value = document.createElement("span");
+    value.className = "gpt-legend-value";
+    value.textContent = `${count} 次`;
+
+    copy.appendChild(name);
+    copy.appendChild(detail);
+    row.appendChild(swatch);
+    row.appendChild(copy);
+    row.appendChild(value);
+    legend.appendChild(row);
+  });
+}
+
+function updateGptCounters() {
+  if (el("gptMyQueryCount")) {
+    el("gptMyQueryCount").textContent = String(currentGptUserQueries());
+  }
+  renderGptStats();
+}
+
+function registerGptQuery(text = "") {
+  const normalizedText = safeText(text).slice(0, 160);
+  const now = Date.now();
+
+  if (!normalizedText) return;
+
+  if (
+    normalizedText
+    && normalizedText === state.gpt.lastTrackedQueryText
+    && now - state.gpt.lastTrackedQueryAt < 1800
+  ) {
+    return;
+  }
+
+  state.gpt.lastTrackedQueryText = normalizedText;
+  state.gpt.lastTrackedQueryAt = now;
+  reportGptUsage().catch((err) => {
+    logLine("app", `上报 GPT 使用次数失败：${err.message || err}`);
+  });
+}
+
+async function persistGptState() {
+  await saveSettings({ silent: true });
+}
+
+async function loadGptSummaryStats() {
+  if (!state.collab.serverUrl || !state.collab.token) {
+    state.gpt.totalQueries = 0;
+    state.gpt.queryUsers = {};
+    updateGptCounters();
+    return;
+  }
+
+  const response = await fetchWithFriendlyError(`${state.collab.serverUrl}/api/gpt/stats`, {
+    method: "GET",
+    headers: {
+      Authorization: `Bearer ${state.collab.token}`,
+    },
+  }, 8000);
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(text || `加载 GPT 使用统计失败（${response.status}）`);
+  }
+
+  const payload = await response.json();
+  state.gpt.totalQueries = Number(payload.totalQueries) || 0;
+  state.gpt.queryUsers = Object.fromEntries(
+    (payload.users || []).map((item) => [safeText(item.username), Number(item.count) || 0]).filter(([username]) => username),
+  );
+  updateGptCounters();
+  await persistGptState();
+}
+
+async function loadGptRangeStats(options = {}) {
+  if (!state.collab.serverUrl || !state.collab.token) {
+    state.gpt.statsTotalQueries = 0;
+    state.gpt.statsUsers = {};
+    state.gpt.statsEntries = [];
+    state.gpt.statsUserCount = 0;
+    renderGptStats();
+    return;
+  }
+
+  const silent = Boolean(options.silent);
+  const params = new URLSearchParams();
+  if (state.gpt.statsFrom) params.set("from", state.gpt.statsFrom);
+  if (state.gpt.statsTo) params.set("to", state.gpt.statsTo);
+
+  const query = params.toString();
+  const response = await fetchWithFriendlyError(`${state.collab.serverUrl}/api/gpt/stats${query ? `?${query}` : ""}`, {
+    method: "GET",
+    headers: {
+      Authorization: `Bearer ${state.collab.token}`,
+    },
+  }, 8000);
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(text || `查询 GPT 使用统计失败（${response.status}）`);
+  }
+
+  const payload = await response.json();
+  state.gpt.statsTotalQueries = Number(payload.totalQueries) || 0;
+  state.gpt.statsUserCount = Number(payload.userCount) || 0;
+  state.gpt.statsEntries = (payload.users || []).map((item) => ({
+    username: safeText(item?.username),
+    displayName: safeText(item?.displayName),
+    count: Number(item?.count) || 0,
+    ratio: Number(item?.ratio) || 0,
+  })).filter((item) => item.username && item.count > 0);
+  state.gpt.statsUsers = Object.fromEntries(
+    state.gpt.statsEntries.map((item) => [item.username, item.count]),
+  );
+  renderGptStats();
+  await persistGptState();
+
+  if (!silent) {
+    setGptStatsFeedback("GPT 使用统计已更新。", "success");
+  } else {
+    setGptStatsFeedback("");
+  }
+}
+
+async function reportGptUsage() {
+  if (!state.collab.serverUrl || !state.collab.token) return;
+
+  const response = await fetchWithFriendlyError(`${state.collab.serverUrl}/api/gpt/usage`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${state.collab.token}`,
+    },
+    body: JSON.stringify({ count: 1 }),
+  }, 8000);
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(text || `记录 GPT 使用次数失败（${response.status}）`);
+  }
+
+  await loadGptSummaryStats();
+  await loadGptRangeStats({ silent: true });
+}
+
+async function openGptExternal(rawUrl) {
+  const url = safeText(rawUrl) || normalizeGptUrl(state.gpt.lastUrl);
+  if (!url) return;
+  await window.api.openExternal(url);
+}
+
+function rememberGptUrl(rawUrl) {
+  const url = normalizeGptUrl(rawUrl);
+  state.gpt.lastUrl = url;
+  persistGptState().catch((err) => {
+    logLine("app", `保存 GPT 页面位置失败：${err.message || err}`);
+  });
+}
+
+function handleGptTrackerMessage(message) {
+  const raw = String(message || "");
+  if (!raw.startsWith(GPT_QUERY_MARKER)) return false;
+
+  try {
+    const payload = JSON.parse(raw.slice(GPT_QUERY_MARKER.length));
+    registerGptQuery(payload?.text || "");
+  } catch {
+    registerGptQuery("");
+  }
+  return true;
+}
+
+function installGptQueryTracker() {
+  const webview = el("gptWebview");
+  if (!webview || !isGptAllowedUrl(webview.getURL())) return;
+
+  const marker = JSON.stringify(GPT_QUERY_MARKER);
+  webview.executeJavaScript(`
+    (() => {
+      if (window.__gptQueryTrackerInstalled) return;
+      window.__gptQueryTrackerInstalled = true;
+
+      const emit = () => {
+        const textarea = document.querySelector("textarea");
+        const editor = document.querySelector('[contenteditable="true"]');
+        const text = String(textarea?.value || editor?.innerText || "").trim().slice(0, 160);
+        console.log(${marker} + JSON.stringify({ text, stamp: Date.now() }));
+      };
+
+      document.addEventListener("keydown", (event) => {
+        if (event.key !== "Enter" || event.shiftKey) return;
+        const target = event.target;
+        const editable = Boolean(
+          target?.closest?.("textarea")
+          || target?.closest?.('[contenteditable="true"]')
+          || target?.matches?.('[contenteditable="true"]'),
+        );
+        if (!editable) return;
+        setTimeout(emit, 0);
+      }, true);
+
+      document.addEventListener("click", (event) => {
+        const button = event.target?.closest?.(
+          'button[data-testid="send-button"], button[aria-label*="Send"], button[aria-label*="发送"]',
+        );
+        if (!button) return;
+        setTimeout(emit, 0);
+      }, true);
+    })();
+  `).catch(() => {
+    // ignore tracker injection failures
+  });
+}
+
+function bindGptWebviewEvents() {
+  const webview = el("gptWebview");
+  if (!webview || state.gpt.webviewListenersBound) return;
+  state.gpt.webviewListenersBound = true;
+
+  webview.addEventListener("did-start-loading", () => {
+    state.gpt.webviewLoading = true;
+    updateGptRuntimeState();
+    setGptFeedback("");
+    updateGptNavState();
+  });
+
+  webview.addEventListener("dom-ready", () => {
+    installGptQueryTracker();
+    updateGptNavState();
+  });
+
+  webview.addEventListener("did-stop-loading", () => {
+    state.gpt.webviewLoading = false;
+    updateGptRuntimeState();
+    const currentUrl = safeText(webview.getURL());
+    if (currentUrl && isGptAllowedUrl(currentUrl)) {
+      rememberGptUrl(currentUrl);
+    }
+    installGptQueryTracker();
+    updateGptNavState();
+  });
+
+  webview.addEventListener("did-fail-load", (event) => {
+    if (Number(event.errorCode) === -3) return;
+    state.gpt.webviewLoading = false;
+    updateGptRuntimeState();
+    setGptFeedback(`GPT 页面加载失败：${event.errorDescription || event.errorCode || "未知错误"}`, "error");
+    updateGptNavState();
+  });
+
+  ["did-navigate", "did-navigate-in-page"].forEach((eventName) => {
+    webview.addEventListener(eventName, (event) => {
+      if (!isGptAllowedUrl(event.url)) {
+        openGptExternal(event.url).catch((err) => {
+          setGptFeedback(`外部链接打开失败：${err.message || err}`, "error");
+        });
+        if (typeof webview.canGoBack === "function" && webview.canGoBack()) {
+          webview.goBack();
+        } else if (typeof webview.loadURL === "function") {
+          webview.loadURL(normalizeGptUrl(state.gpt.lastUrl));
+        }
+        return;
+      }
+      rememberGptUrl(event.url);
+      updateGptNavState();
+    });
+  });
+
+  webview.addEventListener("will-navigate", (event) => {
+    if (isGptAllowedUrl(event.url)) return;
+    event.preventDefault();
+    openGptExternal(event.url).catch((err) => {
+      setGptFeedback(`外部链接打开失败：${err.message || err}`, "error");
+    });
+  });
+
+  webview.addEventListener("new-window", (event) => {
+    event.preventDefault();
+    openGptExternal(event.url).catch((err) => {
+      setGptFeedback(`外部链接打开失败：${err.message || err}`, "error");
+    });
+  });
+
+  webview.addEventListener("console-message", (event) => {
+    handleGptTrackerMessage(event.message);
+  });
+}
+
+async function configureGptSession(force = false) {
+  updateGptProxyInfo();
+  const signature = `${state.gpt.partition}:${state.gpt.proxyHost}:${state.gpt.proxyPort}`;
+  if (!force && state.gpt.sessionPreparedFor === signature) {
+    return true;
+  }
+
+  await window.api.configureGptSession({
+    partition: state.gpt.partition,
+    host: state.gpt.proxyHost,
+    port: state.gpt.proxyPort,
+  });
+  state.gpt.sessionPreparedFor = signature;
+  return true;
+}
+
+async function ensureGptWorkspace(options = {}) {
+  const forceReload = Boolean(options.forceReload);
+  updateGptProxyInfo();
+  updateGptRuntimeState();
+
+  if (!state.status?.senderRunning) {
+    return;
+  }
+
+  const webview = el("gptWebview");
+  if (!webview) return;
+
+  bindGptWebviewEvents();
+  await configureGptSession(forceReload);
+
+  const userAgent = gptUserAgent();
+  if (webview.getAttribute("useragent") !== userAgent) {
+    webview.setAttribute("useragent", userAgent);
+  }
+
+  if (!state.gpt.webviewInitialized || !safeText(webview.src)) {
+    state.gpt.webviewInitialized = true;
+    state.gpt.webviewLoading = true;
+    updateGptRuntimeState();
+    webview.src = normalizeGptUrl(state.gpt.lastUrl);
+    updateGptNavState();
+    return;
+  }
+
+  if (forceReload) {
+    state.gpt.webviewLoading = true;
+    updateGptRuntimeState();
+    webview.reload();
+    updateGptNavState();
+  }
+
+  updateGptNavState();
+}
+
+function roomConversationKey(scopeText = state.collab.roomScope) {
+  return `room:${safeText(scopeText) || "-"}`;
+}
+
+function privateConversationKey(username) {
+  const user = safeText(username);
+  return user ? `user:${user}` : "";
+}
+
+function currentConversationKey() {
+  if (currentChatScope() === "private") {
+    return privateConversationKey(el("c_chat_target")?.value);
+  }
+  return roomConversationKey();
+}
+
+function formatUnreadCount(count) {
+  const value = Number(count) || 0;
+  if (value <= 0) return "";
+  return value > 99 ? "99+" : String(value);
+}
+
+function getUnreadCount(key) {
+  return Number(state.collab.unreadByConversation.get(key) || 0);
+}
+
+function clearUnreadCount(key) {
+  if (!key) return;
+  state.collab.unreadByConversation.delete(key);
+}
+
+function increaseUnreadCount(key) {
+  if (!key) return;
+  const next = getUnreadCount(key) + 1;
+  state.collab.unreadByConversation.set(key, next);
+}
+
+function resetConversationState() {
+  state.collab.messagesByConversation = new Map();
+  state.collab.unreadByConversation = new Map();
+}
+
+function resetPresenceState() {
+  state.collab.knownOnlineUsers = new Set();
+  state.collab.presenceReady = false;
+}
+
+function showToast(title, message, tone = "info") {
+  const stack = el("toastStack");
+  if (!stack) return;
+
+  const card = document.createElement("article");
+  card.className = "toast-card";
+  card.dataset.tone = tone;
+
+  const heading = document.createElement("strong");
+  heading.textContent = safeText(title) || "提醒";
+
+  const text = document.createElement("p");
+  text.textContent = safeText(message);
+
+  card.appendChild(heading);
+  card.appendChild(text);
+  stack.prepend(card);
+
+  while (stack.childElementCount > 4) {
+    stack.lastElementChild?.remove();
+  }
+
+  window.setTimeout(() => {
+    card.remove();
+  }, 4200);
+}
+
 function logLine(source, line) {
   const box = el("logBox");
   if (!box) return;
@@ -221,6 +965,18 @@ function getViewMeta(view) {
       title: "联系人与聊天",
       subtitle: "左侧选择当前房间或联系人，右侧查看消息并继续聊天。",
     },
+    "message-settings": {
+      title: "消息设置",
+      subtitle: "控制收到消息和联系人上线时的提醒方式。",
+    },
+    gpt: {
+      title: "GPT 工作区",
+      subtitle: "在软件里继续你的 GPT 对话，并通过本地代理访问。",
+    },
+    "gpt-stats": {
+      title: "GPT 使用统计",
+      subtitle: "按时间范围查看所有账号的 GPT 提问次数分布。",
+    },
   };
 
   return viewMeta[view] || viewMeta.sender;
@@ -238,12 +994,15 @@ function syncTopbarTitle(view) {
 function getAvailableViews(mode = state.mode) {
   if (mode === "receiver") return ["receiver", "logs"];
   if (!state.collab.token) return ["account"];
-  return ["sender", "logs", "account", "chat"];
+  return ["sender", "logs", "account", "gpt", "chat", "message-settings", "gpt-stats"];
 }
 
 function setActiveView(view) {
   const availableViews = getAvailableViews();
   const nextView = availableViews.includes(view) ? view : availableViews[0];
+  const activeNavView = ["message-settings", "chat"].includes(nextView)
+    ? "chat"
+    : (nextView === "gpt-stats" ? "gpt-stats" : nextView);
   state.view = nextView;
   document.body.dataset.view = nextView;
 
@@ -252,10 +1011,25 @@ function setActiveView(view) {
   });
 
   document.querySelectorAll("[data-view-target]").forEach((button) => {
-    button.classList.toggle("active", button.getAttribute("data-view-target") === nextView);
+    button.classList.toggle("active", button.getAttribute("data-view-target") === activeNavView);
   });
 
   syncTopbarTitle(nextView);
+  if (nextView === "chat") {
+    syncChatConversation();
+  }
+  if (nextView === "gpt") {
+    ensureGptWorkspace().catch((err) => {
+      setGptFeedback(err.message || String(err), "error");
+    });
+  }
+  if (nextView === "gpt-stats") {
+    syncGptStatsFilterInputs();
+    renderGptStats();
+    loadGptRangeStats({ silent: true }).catch((err) => {
+      setGptStatsFeedback(err.message || String(err), "error");
+    });
+  }
 }
 
 function syncAuthLayout() {
@@ -314,6 +1088,13 @@ function setStatus(status) {
   if (el("btnStopReceiver")) el("btnStopReceiver").disabled = !receiverRunning;
 
   refreshSenderAccess();
+  updateGptRuntimeState();
+
+  if (senderRunning && state.view === "gpt" && !state.gpt.webviewInitialized) {
+    ensureGptWorkspace().catch((err) => {
+      setGptFeedback(err.message || String(err), "error");
+    });
+  }
 }
 
 function applyModeLayout(mode) {
@@ -350,11 +1131,30 @@ function getReceiverForm() {
   };
 }
 
+function getGptForm() {
+  return {
+    partition: state.gpt.partition,
+    home_url: state.gpt.homeUrl,
+    last_url: normalizeGptUrl(state.gpt.lastUrl),
+    proxy_host: state.gpt.proxyHost,
+    proxy_port: resolveGptProxyPort(),
+    total_queries: gptTotalQueries(),
+    query_users: state.gpt.queryUsers,
+    stats_preset: state.gpt.statsPreset,
+    stats_from: state.gpt.statsFrom,
+    stats_to: state.gpt.statsTo,
+  };
+}
+
 function getCollabForm() {
   return {
     server_url: safeText(el("c_server_url")?.value),
     last_username: safeText(el("c_username")?.value),
     last_avatar: safeText(state.collab.avatar),
+    remember_password: Boolean(state.collab.rememberPassword),
+    saved_password: state.collab.rememberPassword ? String(state.collab.savedPassword || "") : "",
+    notify_message_popup: Boolean(state.collab.notifyMessagePopup),
+    notify_user_online: Boolean(state.collab.notifyUserOnline),
     pinned_users: [...state.collab.pinnedUsers],
   };
 }
@@ -363,6 +1163,7 @@ function fillForm(settings) {
   const sender = settings.sender || {};
   const receiver = settings.receiver || {};
   const collab = settings.collab || {};
+  const gpt = settings.gpt || {};
 
   if (el("s_proxy_server")) el("s_proxy_server").value = sender.proxy_server || "";
   if (el("s_proxy_port")) el("s_proxy_port").value = sender.proxy_port || "";
@@ -388,12 +1189,45 @@ function fillForm(settings) {
 
   if (el("c_server_url")) el("c_server_url").value = collab.server_url || "";
   if (el("c_username")) el("c_username").value = collab.last_username || "";
-  if (el("c_password")) el("c_password").value = "";
+  state.collab.rememberPassword = Boolean(collab.remember_password);
+  state.collab.savedPassword = state.collab.rememberPassword ? String(collab.saved_password || "") : "";
+  state.collab.notifyMessagePopup = collab.notify_message_popup !== false;
+  state.collab.notifyUserOnline = Boolean(collab.notify_user_online);
+  if (el("c_password")) el("c_password").value = state.collab.savedPassword;
+  if (el("c_remember_password")) el("c_remember_password").checked = state.collab.rememberPassword;
+  if (el("c_notify_message_popup")) el("c_notify_message_popup").checked = state.collab.notifyMessagePopup;
+  if (el("c_notify_user_online")) el("c_notify_user_online").checked = state.collab.notifyUserOnline;
 
   state.collab.avatar = safeText(collab.last_avatar);
   state.collab.pinnedUsers = new Set(Array.isArray(collab.pinned_users) ? collab.pinned_users.map((item) => safeText(item)).filter(Boolean) : []);
+  state.gpt.partition = safeText(gpt.partition) || state.gpt.partition;
+  state.gpt.homeUrl = normalizeGptUrl(gpt.home_url || state.gpt.homeUrl);
+  state.gpt.lastUrl = normalizeGptUrl(gpt.last_url || state.gpt.homeUrl);
+  state.gpt.proxyHost = safeText(gpt.proxy_host) || GPT_PROXY_HOST;
+  state.gpt.proxyPort = safeText(gpt.proxy_port) || GPT_PROXY_PORT;
+  state.gpt.totalQueries = Number(gpt.total_queries) || 0;
+  state.gpt.queryUsers = Object.fromEntries(
+    Object.entries(gpt.query_users || {})
+      .map(([username, count]) => [safeText(username), Number(count) || 0])
+      .filter(([username, count]) => username && count > 0),
+  );
+  const statsPreset = safeText(gpt.stats_preset);
+  if (statsPreset === "custom") {
+    state.gpt.statsPreset = "custom";
+    state.gpt.statsFrom = safeText(gpt.stats_from);
+    state.gpt.statsTo = safeText(gpt.stats_to);
+  } else if (statsPreset === "all") {
+    setGptStatsPreset("all");
+  } else {
+    setGptStatsPreset(statsPreset || "30d");
+  }
 
   refreshFallbackVisibility();
+  updateGptProxyInfo();
+  syncGptStatsFilterInputs();
+  syncGptFullscreenState();
+  updateGptCounters();
+  updateGptRuntimeState();
 }
 
 function applyDeviceInfo(deviceInfo) {
@@ -465,12 +1299,6 @@ async function applyTestDefaults() {
     }
   }
 
-  if (!safeText(el("c_username")?.value)) {
-    el("c_username").value = "demo_user";
-  }
-  if (!safeText(el("c_password")?.value)) {
-    el("c_password").value = "DemoPass123";
-  }
 }
 
 async function syncWindowMaxButton() {
@@ -501,6 +1329,7 @@ async function saveSettings(options = {}) {
     sender: getSenderForm(),
     receiver: getReceiverForm(),
     collab: getCollabForm(),
+    gpt: getGptForm(),
   };
   await window.api.saveSettings(state.settings);
   if (!silent) {
@@ -639,12 +1468,14 @@ function sortUsers(users) {
 }
 
 function pickPrivateTarget(username) {
+  const targetUser = safeText(username);
+  if (!targetUser) return;
   if (el("c_chat_scope")) {
     el("c_chat_scope").value = "private";
   }
   refreshPrivateTargets();
   if (el("c_chat_target")) {
-    el("c_chat_target").value = username;
+    el("c_chat_target").value = targetUser;
   }
   syncChatConversation();
   setPanelFeedback("chat_feedback", "");
@@ -668,7 +1499,6 @@ function openFriendActionsMenu(user, event) {
   const username = safeText(user?.username);
   if (!username) return;
   const pinned = state.collab.pinnedUsers.has(username);
-  const online = Boolean(user?.online);
 
   showContextMenu(event.clientX, event.clientY, [
     {
@@ -677,7 +1507,7 @@ function openFriendActionsMenu(user, event) {
     },
     {
       label: "设为私聊对象",
-      disabled: !online || username === state.collab.username,
+      disabled: username === state.collab.username,
       onClick: () => {
         pickPrivateTarget(username);
       },
@@ -718,7 +1548,6 @@ function renderUserDirectory(users) {
     const li = document.createElement("li");
     li.textContent = "暂时没有联系人";
     list.appendChild(li);
-    syncChatConversation();
     return;
   }
 
@@ -730,6 +1559,7 @@ function renderUserDirectory(users) {
     const pinned = state.collab.pinnedUsers.has(username);
     const self = username === state.collab.username;
     const selected = currentChatScope() === "private" && safeText(el("c_chat_target")?.value) === username;
+    const unread = getUnreadCount(privateConversationKey(username));
     const subnet = safeText(user.subnetLabel || user.subnetKey);
     const subtitleBits = [self ? "当前账号" : username];
 
@@ -763,22 +1593,29 @@ function renderUserDirectory(users) {
     badge.className = `user-badge ${online ? "" : "off"}`;
     badge.textContent = self ? "自己" : (online ? "在线" : "离线");
 
+    const side = document.createElement("div");
+    side.className = "contact-side";
+    side.appendChild(badge);
+
+    if (unread > 0) {
+      const unreadBadge = document.createElement("span");
+      unreadBadge.className = "unread-badge";
+      unreadBadge.textContent = formatUnreadCount(unread);
+      side.appendChild(unreadBadge);
+    }
+
     copy.appendChild(name);
     copy.appendChild(meta);
     main.appendChild(avatarNode);
     main.appendChild(copy);
     li.appendChild(main);
-    li.appendChild(badge);
+    li.appendChild(side);
 
     li.addEventListener("click", (event) => {
       event.preventDefault();
       event.stopPropagation();
       if (self) {
         setPanelFeedback("chat_feedback", "当前账号就是你自己，不需要给自己发私聊消息。", "error");
-        return;
-      }
-      if (!online) {
-        setPanelFeedback("chat_feedback", "对方当前不在线，暂时无法发起私聊。", "error");
         return;
       }
       pickPrivateTarget(username);
@@ -792,13 +1629,11 @@ function renderUserDirectory(users) {
 
     list.appendChild(li);
   }
-
-  syncChatConversation();
 }
 
-function setUserDirectory(users) {
+function setUserDirectory(users, options = {}) {
   const items = Array.isArray(users) ? users : [];
-  state.collab.userDirectory = items.map((item) => ({
+  const normalized = items.map((item) => ({
     username: safeText(item?.username),
     displayName: safeText(item?.displayName) || safeText(item?.username),
     avatar: safeText(item?.avatar),
@@ -806,6 +1641,18 @@ function setUserDirectory(users) {
     subnetKey: safeText(item?.subnetKey),
     subnetLabel: safeText(item?.subnetLabel),
   })).filter((item) => item.username);
+
+  const nextOnlineUsers = new Set(normalized.filter((item) => item.online && item.username !== state.collab.username).map((item) => item.username));
+  if (!options.silent && state.collab.presenceReady && state.collab.notifyUserOnline) {
+    for (const user of normalized) {
+      if (!user.online || user.username === state.collab.username) continue;
+      if (state.collab.knownOnlineUsers.has(user.username)) continue;
+      showToast("联系人已上线", `${user.displayName || user.username} 现在在线。`, "success");
+    }
+  }
+  state.collab.knownOnlineUsers = nextOnlineUsers;
+  state.collab.presenceReady = true;
+  state.collab.userDirectory = normalized;
 
   renderUserDirectory(state.collab.userDirectory);
   refreshPrivateTargets();
@@ -816,7 +1663,8 @@ function setCollabControls() {
   const hasToken = Boolean(state.collab.token);
   const hasServerUrl = Boolean(safeText(el("c_server_url")?.value));
   const hasUsername = Boolean(safeText(el("c_username")?.value));
-  const canLogin = hasServerUrl && hasUsername;
+  const hasPassword = Boolean(String(el("c_password")?.value || ""));
+  const canLogin = hasServerUrl && hasUsername && hasPassword;
 
   if (el("btnCollabLogin")) el("btnCollabLogin").disabled = hasToken || !canLogin;
   if (el("btnCollabLogout")) el("btnCollabLogout").disabled = !hasToken;
@@ -836,6 +1684,8 @@ function setCollabControls() {
   refreshPrivateTargets();
   refreshSenderAccess();
   refreshTopIdentity();
+  updateGptCounters();
+  updateGptRuntimeState();
   syncAuthLayout();
 }
 
@@ -855,11 +1705,11 @@ function refreshPrivateTargets() {
 
   const oldValue = target.value;
   const scope = currentChatScope();
-  const online = sortUsers(state.collab.userDirectory || []).filter((item) => item.online && item.username !== state.collab.username);
+  const contacts = sortUsers(state.collab.userDirectory || []).filter((item) => item.username !== state.collab.username);
 
   target.textContent = "";
 
-  if (!online.length) {
+  if (!contacts.length) {
     const option = document.createElement("option");
     option.value = "";
     option.textContent = "当前没有可聊天的联系人";
@@ -870,20 +1720,158 @@ function refreshPrivateTargets() {
     first.textContent = "请选择联系人";
     target.appendChild(first);
 
-    for (const item of online) {
+    for (const item of contacts) {
       const option = document.createElement("option");
       option.value = item.username;
-      option.textContent = `${avatarMark(item.avatar, item.displayName)} ${item.displayName}`;
+      option.textContent = `${avatarMark(item.avatar, item.displayName)} ${item.displayName}${item.online ? "" : "（离线）"}`;
       target.appendChild(option);
     }
   }
 
-  if (oldValue && online.some((item) => item.username === oldValue)) {
+  if (oldValue && contacts.some((item) => item.username === oldValue)) {
     target.value = oldValue;
   }
 
-  target.disabled = !isCollabOnline() || scope !== "private";
+  target.disabled = !isCollabOnline() || scope !== "private" || !contacts.length;
   syncChatConversation();
+}
+
+function updateRoomUnreadBadge() {
+  const badge = el("c_room_unread");
+  if (!badge) return;
+  const text = formatUnreadCount(getUnreadCount(roomConversationKey()));
+  badge.hidden = !text;
+  badge.textContent = text || "0";
+}
+
+function normalizeChatMessage(payload) {
+  const scope = safeText(payload?.scope) === "private" ? "private" : "subnet";
+  const from = safeText(payload?.from || payload?.username);
+  const username = safeText(payload?.username || payload?.from) || "系统通知";
+  const displayName = safeText(payload?.displayName) || username;
+  const system = Boolean(payload?.system) || username === "系统通知";
+
+  return {
+    type: safeText(payload?.type) || (system ? "system" : "chat"),
+    scope,
+    from,
+    to: safeText(payload?.to),
+    username,
+    displayName,
+    avatar: safeText(payload?.avatar),
+    text: safeText(payload?.text),
+    timestamp: payload?.timestamp || new Date().toISOString(),
+    subnetKey: safeText(payload?.subnetKey),
+    subnetLabel: safeText(payload?.subnetLabel || payload?.roomScope),
+    system,
+  };
+}
+
+function conversationKeyForMessage(payload) {
+  const message = normalizeChatMessage(payload);
+  if (message.scope === "private") {
+    const fromUser = safeText(message.from);
+    const toUser = safeText(message.to);
+    const otherUser = message.system
+      ? toUser
+      : (fromUser === state.collab.username ? toUser : safeText(fromUser || message.username));
+    return privateConversationKey(otherUser);
+  }
+
+  const roomId = safeText(message.subnetLabel || message.subnetKey || state.collab.roomScope);
+  return roomConversationKey(roomId);
+}
+
+function buildSystemMessage(text, extra = {}) {
+  return normalizeChatMessage({
+    type: "system",
+    username: "系统通知",
+    displayName: "系统通知",
+    text,
+    timestamp: extra.timestamp,
+    scope: extra.scope || "subnet",
+    to: extra.to,
+    subnetKey: extra.subnetKey,
+    subnetLabel: extra.subnetLabel,
+    roomScope: extra.roomScope,
+    system: true,
+  });
+}
+
+function storeConversationMessage(payload) {
+  const message = normalizeChatMessage(payload);
+  const conversationKey = conversationKeyForMessage(message) || currentConversationKey();
+  if (!conversationKey || !message.text) {
+    return { conversationKey: "", message };
+  }
+
+  const items = state.collab.messagesByConversation.get(conversationKey) || [];
+  items.push(message);
+  if (items.length > 300) {
+    items.splice(0, items.length - 300);
+  }
+  state.collab.messagesByConversation.set(conversationKey, items);
+  return { conversationKey, message };
+}
+
+function renderActiveConversation() {
+  const box = el("c_chat_box");
+  if (!box) return;
+
+  const conversationKey = currentConversationKey();
+  const messages = conversationKey ? (state.collab.messagesByConversation.get(conversationKey) || []) : [];
+  box.textContent = "";
+
+  if (!messages.length) {
+    const empty = document.createElement("div");
+    empty.className = "chat-empty";
+    empty.textContent = currentChatScope() === "private"
+      ? "这里暂时还没有私聊记录。选择联系人后，新消息会显示在这里。"
+      : "当前房间还没有消息记录。发送第一条消息后，这里会开始显示聊天内容。";
+    box.appendChild(empty);
+    return;
+  }
+
+  for (const message of messages) {
+    appendChatMessage(message, { box, scroll: false });
+  }
+  box.scrollTop = box.scrollHeight;
+}
+
+function replaceConversationHistory(messages) {
+  resetConversationState();
+  const items = Array.isArray(messages) ? messages : [];
+  for (const item of items) {
+    storeConversationMessage(item);
+  }
+  updateRoomUnreadBadge();
+  renderUserDirectory(state.collab.userDirectory);
+  renderActiveConversation();
+}
+
+function handleIncomingConversationMessage(payload) {
+  const { conversationKey, message } = storeConversationMessage(payload);
+  if (!conversationKey || !message.text) return;
+
+  const activeKey = currentConversationKey();
+  const fromSelf = safeText(message.from) === state.collab.username;
+  const conversationVisible = state.view === "chat" && conversationKey === activeKey && state.windowFocused;
+  const shouldNotify = !fromSelf && !message.system && state.collab.notifyMessagePopup && !conversationVisible;
+
+  if (!fromSelf && !message.system && !conversationVisible) {
+    increaseUnreadCount(conversationKey);
+  }
+
+  if (shouldNotify) {
+    showToast(message.displayName || message.username, message.text, "info");
+  }
+
+  updateRoomUnreadBadge();
+  renderUserDirectory(state.collab.userDirectory);
+
+  if (conversationKey === activeKey) {
+    renderActiveConversation();
+  }
 }
 
 function syncChatConversation() {
@@ -911,44 +1899,46 @@ function syncChatConversation() {
         ? `发送给房间 ${roomScope} 内的所有在线联系人`
         : "发送给当前房间内的所有在线联系人";
     }
-    return;
-  }
-
-  if (!targetUsername) {
+  } else if (!targetUsername) {
     if (titleNode) titleNode.textContent = "请选择联系人";
-    if (subNode) subNode.textContent = "从左侧联系人列表中选择一个在线联系人后，就可以开始私聊。";
-    return;
-  }
-
-  if (!selectedUser) {
+    if (subNode) subNode.textContent = "从左侧联系人列表中选择联系人后，就可以查看私聊记录并继续发送消息。";
+  } else if (!selectedUser) {
     if (titleNode) titleNode.textContent = targetUsername;
-    if (subNode) subNode.textContent = "对方当前不在线，暂时不能继续私聊。";
-    return;
+    if (subNode) subNode.textContent = "当前没有拿到这个联系人的在线信息，但历史消息仍然会显示在这里。";
+  } else {
+    const subnet = safeText(selectedUser.subnetLabel || selectedUser.subnetKey);
+    const detailBits = [
+      selectedUser.online ? "在线" : "离线",
+      selectedUser.username,
+    ];
+    if (subnet) {
+      detailBits.push(subnet);
+    }
+
+    if (titleNode) titleNode.textContent = safeText(selectedUser.displayName) || selectedUser.username;
+    if (subNode) subNode.textContent = detailBits.join(" · ");
   }
 
-  const subnet = safeText(selectedUser.subnetLabel || selectedUser.subnetKey);
-  const detailBits = [
-    selectedUser.online ? "在线" : "离线",
-    selectedUser.username,
-  ];
-  if (subnet) {
-    detailBits.push(subnet);
+  const activeKey = inRoom ? roomConversationKey() : privateConversationKey(targetUsername);
+  if (state.view === "chat") {
+    clearUnreadCount(activeKey);
   }
-
-  if (titleNode) titleNode.textContent = safeText(selectedUser.displayName) || selectedUser.username;
-  if (subNode) subNode.textContent = detailBits.join(" · ");
+  updateRoomUnreadBadge();
+  renderUserDirectory(state.collab.userDirectory);
+  renderActiveConversation();
 }
 
-function appendChatMessage(payload) {
-  const box = el("c_chat_box");
+function appendChatMessage(payload, options = {}) {
+  const box = options.box || el("c_chat_box");
   if (!box) return;
 
   const row = document.createElement("div");
-  const username = safeText(payload?.username || payload?.from) || "系统通知";
-  const displayName = safeText(payload?.displayName) || username;
-  const avatar = avatarMark(payload?.avatar, displayName);
-  const rawFrom = safeText(payload?.from || payload?.username);
-  const isSystem = username === "系统通知";
+  const message = normalizeChatMessage(payload);
+  const username = message.username || "系统通知";
+  const displayName = message.displayName || username;
+  const avatar = avatarMark(message.avatar, displayName);
+  const rawFrom = safeText(message.from || message.username);
+  const isSystem = Boolean(message.system);
   const isSelf = !isSystem && rawFrom && rawFrom === state.collab.username;
   row.className = `chat-item${isSelf ? " self" : ""}${isSystem ? " system" : ""}`;
 
@@ -961,32 +1951,28 @@ function appendChatMessage(payload) {
 
   const meta = document.createElement("div");
   meta.className = "meta";
-  const scope = safeText(payload?.scope) === "private" ? "私聊消息" : "房间消息";
-  const target = safeText(payload?.to);
+  const scope = message.scope === "private" ? "私聊消息" : "房间消息";
+  const target = safeText(message.to);
   const toText = target ? ` -> ${target}` : "";
   const whoText = isSystem ? "系统通知" : (isSelf ? `我${toText}` : `${displayName}${toText}`);
-  meta.textContent = `${formatTime(payload?.timestamp)} · ${scope} · ${whoText}`;
+  meta.textContent = `${formatTime(message.timestamp)} · ${scope} · ${whoText}`;
 
   const bubble = document.createElement("div");
   bubble.className = "chat-bubble";
-  bubble.textContent = safeText(payload?.text);
+  bubble.textContent = message.text;
 
   wrap.appendChild(meta);
   wrap.appendChild(bubble);
   row.appendChild(avatarNode);
   row.appendChild(wrap);
   box.appendChild(row);
-  box.scrollTop = box.scrollHeight;
+  if (options.scroll !== false) {
+    box.scrollTop = box.scrollHeight;
+  }
 }
 
 function renderHistory(messages) {
-  const box = el("c_chat_box");
-  if (!box) return;
-  box.textContent = "";
-  const items = Array.isArray(messages) ? messages : [];
-  for (const msg of items) {
-    appendChatMessage(msg);
-  }
+  replaceConversationHistory(messages);
 }
 
 function closeCollabSocket() {
@@ -1059,6 +2045,9 @@ async function refreshUserDirectory() {
 
     if (!response.ok) return;
     const payload = await response.json();
+    if (payload.roomScope) {
+      setRoomScope(payload.roomScope);
+    }
     setUserDirectory(payload.users || []);
   } catch (err) {
     logLine("collab", `刷新在线联系人失败：${err.message || err}`);
@@ -1090,13 +2079,29 @@ async function collabLogout(notifyServer) {
   state.collab.displayName = "";
   state.collab.avatar = "";
   state.collab.connected = false;
+  resetConversationState();
+  resetPresenceState();
+  state.gpt.totalQueries = 0;
+  state.gpt.queryUsers = {};
+  state.gpt.statsTotalQueries = 0;
+  state.gpt.statsUsers = {};
+  state.gpt.statsEntries = [];
+  state.gpt.statsUserCount = 0;
   if (el("c_chat_scope")) el("c_chat_scope").value = "subnet";
   if (el("c_chat_target")) el("c_chat_target").value = "";
+  if (el("c_password")) {
+    el("c_password").value = state.collab.rememberPassword ? state.collab.savedPassword : "";
+  }
   setCollabState("未登录");
   setCollabFeedback("");
   setPanelFeedback("chat_feedback", "");
+  setGptFeedback("");
+  setGptStatsFeedback("");
   setCollabIdentity("-");
-  setUserDirectory([]);
+  setUserDirectory([], { silent: true });
+  updateRoomUnreadBadge();
+  renderActiveConversation();
+  updateGptCounters();
   setCollabControls();
   hideContextMenu();
 }
@@ -1157,17 +2162,28 @@ function connectCollabWebSocket() {
     }
 
     if (payload.type === "chat") {
-      appendChatMessage(payload);
+      handleIncomingConversationMessage(payload);
       return;
     }
 
     if (payload.type === "system") {
-      appendChatMessage({ username: "系统通知", text: payload.text, timestamp: payload.timestamp, scope: payload.scope || "subnet" });
+      handleIncomingConversationMessage(buildSystemMessage(payload.text, {
+        timestamp: payload.timestamp,
+        scope: payload.scope || "subnet",
+        subnetKey: payload.subnetKey,
+        subnetLabel: payload.subnetLabel,
+        roomScope: payload.roomScope || state.collab.roomScope,
+      }));
       return;
     }
 
     if (payload.type === "error") {
-      appendChatMessage({ username: "系统通知", text: payload.text, timestamp: payload.timestamp, scope: "private" });
+      handleIncomingConversationMessage(buildSystemMessage(payload.text, {
+        timestamp: payload.timestamp,
+        scope: currentChatScope() === "private" ? "private" : "subnet",
+        to: safeText(el("c_chat_target")?.value),
+        roomScope: state.collab.roomScope,
+      }));
     }
   };
 
@@ -1192,6 +2208,7 @@ async function collabLogin() {
   const serverUrl = safeText(el("c_server_url")?.value).replace(/\/+$/, "");
   const username = safeText(el("c_username")?.value);
   const password = String(el("c_password")?.value || "");
+  const rememberPassword = Boolean(el("c_remember_password")?.checked);
 
   if (!serverUrl || !username || !password) {
     throw new Error("请先填写完整的服务地址、账号和密码");
@@ -1224,6 +2241,8 @@ async function collabLogin() {
   state.collab.token = payload.token;
   state.collab.avatar = safeText(payload?.profile?.avatar) || state.collab.avatar;
   state.collab.displayName = safeText(payload?.profile?.displayName) || username;
+  state.collab.rememberPassword = rememberPassword;
+  state.collab.savedPassword = rememberPassword ? password : "";
   setRoomScope(payload?.roomScope);
 
   setCollabIdentity(state.collab.displayName || username);
@@ -1231,11 +2250,43 @@ async function collabLogin() {
 
   await saveSettings({ silent: true });
   renderHistory(payload.history || []);
-  setUserDirectory(payload.users || payload.onlineUsers || []);
+  resetPresenceState();
+  setUserDirectory(payload.users || payload.onlineUsers || [], { silent: true });
+  if (el("c_password")) {
+    el("c_password").value = state.collab.rememberPassword ? state.collab.savedPassword : "";
+  }
+  syncGptStatsFilterInputs();
+  const gptStatsTasks = await Promise.allSettled([
+    loadGptSummaryStats(),
+    loadGptRangeStats({ silent: true }),
+  ]);
+  gptStatsTasks
+    .filter((item) => item.status === "rejected")
+    .forEach((item) => {
+      logLine("app", `加载 GPT 统计失败：${item.reason?.message || item.reason || "未知错误"}`);
+    });
   setCollabFeedback("登录成功，可以开始使用主界面了。", "success");
   state.view = "sender";
   setCollabControls();
   connectCollabWebSocket();
+}
+
+async function submitCollabLogin() {
+  try {
+    await collabLogin();
+    logLine("collab", "登录成功");
+  } catch (err) {
+    const message = err.message || String(err);
+    setCollabState("登录失败");
+    setCollabControls();
+    setCollabFeedback(message, "error");
+    logLine("collab", `登录失败：${message}`);
+    focusCollabField("c_password", true);
+  }
+}
+
+async function persistCollabPreferences() {
+  await saveSettings({ silent: true });
 }
 
 function sendChatMessage() {
@@ -1251,7 +2302,7 @@ function sendChatMessage() {
   const scope = currentChatScope();
   const target = safeText(el("c_chat_target")?.value);
   if (scope === "private" && !target) {
-    setPanelFeedback("chat_feedback", "请先从左侧联系人列表中选择一个在线联系人。", "error");
+    setPanelFeedback("chat_feedback", "请先从左侧联系人列表中选择一个联系人。", "error");
     return;
   }
 
@@ -1326,8 +2377,20 @@ async function main() {
 
   if (el("senderPanel")) {
     el("senderPanel").querySelectorAll("input, select, textarea").forEach((node) => {
-      node.addEventListener("input", () => clearServiceFeedback("sender"));
-      node.addEventListener("change", () => clearServiceFeedback("sender"));
+      node.addEventListener("input", () => {
+        clearServiceFeedback("sender");
+        if (node.id === "s_socks_listen_port") {
+          updateGptProxyInfo();
+          updateGptRuntimeState();
+        }
+      });
+      node.addEventListener("change", () => {
+        clearServiceFeedback("sender");
+        if (node.id === "s_socks_listen_port") {
+          updateGptProxyInfo();
+          updateGptRuntimeState();
+        }
+      });
     });
   }
 
@@ -1408,24 +2471,12 @@ async function main() {
       if (el("logBox")) el("logBox").textContent = "";
       if (el("receiverSingboxLog")) el("receiverSingboxLog").textContent = "";
       if (el("receiverFrpcLog")) el("receiverFrpcLog").textContent = "";
-      if (el("c_chat_box")) el("c_chat_box").textContent = "";
     });
   }
 
   if (el("btnCollabLogin")) {
     el("btnCollabLogin").addEventListener("click", async () => {
-      try {
-        await collabLogin();
-        logLine("collab", "登录成功");
-        if (el("c_password")) el("c_password").value = "";
-      } catch (err) {
-        const message = err.message || String(err);
-        setCollabState("登录失败");
-        setCollabControls();
-        setCollabFeedback(message, "error");
-        logLine("collab", `登录失败：${message}`);
-        focusCollabField("c_password", true);
-      }
+      await submitCollabLogin();
     });
   }
 
@@ -1441,7 +2492,45 @@ async function main() {
       }
       setCollabControls();
     });
+    input.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" && !state.collab.token) {
+        event.preventDefault();
+        submitCollabLogin().catch((err) => {
+          logLine("collab", `登录处理失败：${err.message || err}`);
+        });
+      }
+    });
   });
+
+  if (el("c_remember_password")) {
+    el("c_remember_password").addEventListener("change", () => {
+      state.collab.rememberPassword = Boolean(el("c_remember_password")?.checked);
+      if (!state.collab.rememberPassword) {
+        state.collab.savedPassword = "";
+      }
+      persistCollabPreferences().catch((err) => {
+        logLine("collab", `保存登录选项失败：${err.message || err}`);
+      });
+    });
+  }
+
+  if (el("c_notify_message_popup")) {
+    el("c_notify_message_popup").addEventListener("change", () => {
+      state.collab.notifyMessagePopup = Boolean(el("c_notify_message_popup")?.checked);
+      persistCollabPreferences().catch((err) => {
+        logLine("collab", `保存消息提醒设置失败：${err.message || err}`);
+      });
+    });
+  }
+
+  if (el("c_notify_user_online")) {
+    el("c_notify_user_online").addEventListener("change", () => {
+      state.collab.notifyUserOnline = Boolean(el("c_notify_user_online")?.checked);
+      persistCollabPreferences().catch((err) => {
+        logLine("collab", `保存上线提醒设置失败：${err.message || err}`);
+      });
+    });
+  }
 
   if (el("topCollabIdentity")) {
     el("topCollabIdentity").addEventListener("click", (event) => {
@@ -1513,11 +2602,22 @@ async function main() {
   });
 
   window.addEventListener("blur", () => {
+    state.windowFocused = false;
     if (state.contextMenuOpen) hideContextMenu();
+  });
+
+  window.addEventListener("focus", () => {
+    state.windowFocused = true;
+    if (state.collab.token && state.view === "chat") {
+      syncChatConversation();
+    }
   });
 
   window.addEventListener("resize", () => {
     if (state.contextMenuOpen) hideContextMenu();
+  });
+  document.addEventListener("fullscreenchange", () => {
+    syncGptFullscreenState();
   });
 
   if (el("c_chat_scope")) {
@@ -1530,6 +2630,122 @@ async function main() {
   if (el("c_room_channel")) {
     el("c_room_channel").addEventListener("click", () => {
       pickRoomConversation();
+    });
+  }
+
+  if (el("btnOpenMessageSettings")) {
+    el("btnOpenMessageSettings").addEventListener("click", () => {
+      setActiveView("message-settings");
+    });
+  }
+
+  if (el("btnBackToChat")) {
+    el("btnBackToChat").addEventListener("click", () => {
+      setActiveView("chat");
+    });
+  }
+
+  if (el("btnGptOpenExternal")) {
+    el("btnGptOpenExternal").addEventListener("click", () => {
+      const webview = el("gptWebview");
+      const url = safeText(webview?.getURL?.()) || normalizeGptUrl(state.gpt.lastUrl);
+      openGptExternal(url).catch((err) => {
+        setGptFeedback(`默认浏览器打开失败：${err.message || err}`, "error");
+      });
+    });
+  }
+
+  if (el("btnGptBack")) {
+    el("btnGptBack").addEventListener("click", () => {
+      const webview = el("gptWebview");
+      if (!webview || !state.gpt.canGoBack || typeof webview.goBack !== "function") return;
+      webview.goBack();
+    });
+  }
+
+  if (el("btnGptForward")) {
+    el("btnGptForward").addEventListener("click", () => {
+      const webview = el("gptWebview");
+      if (!webview || !state.gpt.canGoForward || typeof webview.goForward !== "function") return;
+      webview.goForward();
+    });
+  }
+
+  if (el("btnGptReload")) {
+    el("btnGptReload").addEventListener("click", () => {
+      ensureGptWorkspace({ forceReload: true }).catch((err) => {
+        setGptFeedback(err.message || String(err), "error");
+      });
+    });
+  }
+
+  if (el("btnGptGoStats")) {
+    el("btnGptGoStats").addEventListener("click", () => {
+      setActiveView("gpt-stats");
+    });
+  }
+
+  if (el("btnGptToggleFullscreen")) {
+    el("btnGptToggleFullscreen").addEventListener("click", async () => {
+      const shell = el("gptBrowserShell");
+      if (!shell) return;
+
+      try {
+        if (document.fullscreenElement === shell) {
+          await document.exitFullscreen();
+        } else {
+          await shell.requestFullscreen();
+        }
+      } catch (err) {
+        setGptFeedback(`切换全屏失败：${err.message || err}`, "error");
+      } finally {
+        syncGptFullscreenState();
+      }
+    });
+  }
+
+  if (el("btnBackToGpt")) {
+    el("btnBackToGpt").addEventListener("click", () => {
+      setActiveView("gpt");
+    });
+  }
+
+  if (el("gptStatsPreset")) {
+    el("gptStatsPreset").addEventListener("change", () => {
+      readGptStatsRangeFromInputs();
+      setGptStatsFeedback("");
+      persistGptState().catch((err) => {
+        logLine("app", `保存 GPT 统计筛选失败：${err.message || err}`);
+      });
+      if (state.gpt.statsPreset !== "custom") {
+        loadGptRangeStats({ silent: false }).catch((err) => {
+          setGptStatsFeedback(err.message || String(err), "error");
+        });
+      }
+    });
+  }
+
+  ["gptStatsFrom", "gptStatsTo"].forEach((id) => {
+    const input = el(id);
+    if (!input) return;
+    input.addEventListener("input", () => {
+      if (el("gptStatsPreset")) {
+        el("gptStatsPreset").value = "custom";
+      }
+      state.gpt.statsPreset = "custom";
+      state.gpt.statsFrom = safeText(el("gptStatsFrom")?.value);
+      state.gpt.statsTo = safeText(el("gptStatsTo")?.value);
+      renderGptStats();
+      setGptStatsFeedback("");
+    });
+  });
+
+  if (el("btnGptApplyRange")) {
+    el("btnGptApplyRange").addEventListener("click", () => {
+      readGptStatsRangeFromInputs();
+      loadGptRangeStats({ silent: false }).catch((err) => {
+        setGptStatsFeedback(err.message || String(err), "error");
+      });
     });
   }
 
@@ -1582,11 +2798,13 @@ async function main() {
 
   state.collab.serverUrl = safeText(el("c_server_url")?.value).replace(/\/+$/, "");
   state.collab.username = safeText(el("c_username")?.value);
+  resetConversationState();
+  resetPresenceState();
   setCollabState(state.collab.serverUrl ? "未登录" : "请填写服务地址");
   setRoomScope("-");
   setCollabIdentity("-");
   refreshTopIdentity();
-  setUserDirectory([]);
+  setUserDirectory([], { silent: true });
   setCollabControls();
 
   await window.api.getPaths();

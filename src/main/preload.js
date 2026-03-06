@@ -8,6 +8,8 @@ contextBridge.exposeInMainWorld("api", {
   getPaths: () => ipcRenderer.invoke("app:paths"),
   getDeviceInfo: () => ipcRenderer.invoke("app:device-info"),
   getMode: () => ipcRenderer.invoke("app:mode"),
+  openExternal: (url) => ipcRenderer.invoke("shell:open-external", url),
+  configureGptSession: (payload) => ipcRenderer.invoke("gpt:configure-session", payload),
   openProfileEditor: (payload) => ipcRenderer.invoke("profile:open", payload),
   emitProfileUpdated: (payload) => ipcRenderer.send("profile:updated", payload),
   minimizeWindow: () => ipcRenderer.invoke("window:minimize"),

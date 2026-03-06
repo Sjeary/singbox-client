@@ -8,14 +8,20 @@ const { WebSocketServer } = require("ws");
 const HOST = process.env.HOST || "0.0.0.0";
 const PORT = Number.parseInt(process.env.PORT || "8088", 10);
 const USERS_FILE = process.env.USERS_FILE || path.join(__dirname, "data", "users.json");
+const GPT_USAGE_FILE = process.env.GPT_USAGE_FILE || path.join(__dirname, "data", "gpt_usage.json");
 const SESSION_TTL_MS = Number.parseInt(process.env.SESSION_TTL_MS || `${24 * 60 * 60 * 1000}`, 10);
 const HISTORY_MAX = Number.parseInt(process.env.HISTORY_MAX || "200", 10);
 const MAX_AVATAR_LENGTH = Number.parseInt(process.env.MAX_AVATAR_LENGTH || `${150 * 1024}`, 10);
+const GPT_USAGE_MAX = Number.parseInt(process.env.GPT_USAGE_MAX || "50000", 10);
 
 const sessions = new Map();
 const wsClients = new Set();
 const wsByToken = new Map();
 const history = [];
+
+function safeEnvText(value) {
+  return String(value || "").trim();
+}
 
 function safeText(value) {
   return String(value || "").trim();
@@ -84,6 +90,57 @@ function loadUserStore() {
 
 function saveUserStore(store) {
   fs.writeFileSync(USERS_FILE, JSON.stringify(store, null, 2), "utf-8");
+}
+
+function ensureGptUsageFile() {
+  fs.mkdirSync(path.dirname(GPT_USAGE_FILE), { recursive: true });
+  if (!fs.existsSync(GPT_USAGE_FILE)) {
+    fs.writeFileSync(GPT_USAGE_FILE, JSON.stringify({ events: [] }, null, 2), "utf-8");
+  }
+}
+
+function normalizeUsageEvent(record) {
+  const username = safeText(record?.username);
+  const timestamp = safeText(record?.timestamp);
+  const count = Math.max(1, Number.parseInt(String(record?.count || "1"), 10) || 1);
+  const parsedTime = new Date(timestamp);
+
+  return {
+    username,
+    timestamp: Number.isNaN(parsedTime.getTime()) ? nowIso() : parsedTime.toISOString(),
+    count,
+  };
+}
+
+function loadGptUsageStore() {
+  ensureGptUsageFile();
+  try {
+    const raw = JSON.parse(fs.readFileSync(GPT_USAGE_FILE, "utf-8"));
+    const events = Array.isArray(raw.events) ? raw.events.map(normalizeUsageEvent).filter((item) => item.username) : [];
+    return { events };
+  } catch {
+    return { events: [] };
+  }
+}
+
+function saveGptUsageStore(store) {
+  const events = Array.isArray(store?.events) ? store.events.map(normalizeUsageEvent).filter((item) => item.username) : [];
+  if (events.length > GPT_USAGE_MAX) {
+    events.splice(0, events.length - GPT_USAGE_MAX);
+  }
+  fs.writeFileSync(GPT_USAGE_FILE, JSON.stringify({ events }, null, 2), "utf-8");
+}
+
+function recordGptUsage(username, count = 1) {
+  const normalizedUsername = safeText(username);
+  if (!normalizedUsername) return;
+  const usageStore = loadGptUsageStore();
+  usageStore.events.push({
+    username: normalizedUsername,
+    timestamp: nowIso(),
+    count: Math.max(1, Number.parseInt(String(count || "1"), 10) || 1),
+  });
+  saveGptUsageStore(usageStore);
 }
 
 function findUser(username) {
@@ -361,6 +418,81 @@ function applyProfileUpdate(session, user, payload) {
   }
 }
 
+function parseRangeBoundary(rawValue, endOfDay = false) {
+  const raw = safeText(rawValue);
+  if (!raw) return null;
+
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+    const suffix = endOfDay ? "T23:59:59.999Z" : "T00:00:00.000Z";
+    const parsed = new Date(`${raw}${suffix}`);
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+  }
+
+  const parsed = new Date(raw);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function buildGptUsageStats(fromRaw, toRaw) {
+  const fromDate = parseRangeBoundary(fromRaw, false);
+  const toDate = parseRangeBoundary(toRaw, true);
+
+  if (fromRaw && !fromDate) {
+    throw new Error("开始时间格式不正确");
+  }
+  if (toRaw && !toDate) {
+    throw new Error("结束时间格式不正确");
+  }
+  if (fromDate && toDate && fromDate.getTime() > toDate.getTime()) {
+    throw new Error("开始时间不能晚于结束时间");
+  }
+
+  const usageStore = loadGptUsageStore();
+  const fromMs = fromDate ? fromDate.getTime() : Number.NEGATIVE_INFINITY;
+  const toMs = toDate ? toDate.getTime() : Number.POSITIVE_INFINITY;
+
+  const filteredEvents = usageStore.events.filter((item) => {
+    const ts = new Date(item.timestamp).getTime();
+    if (!Number.isFinite(ts)) return false;
+    return ts >= fromMs && ts <= toMs;
+  });
+
+  const userStore = loadUserStore();
+  const displayNameMap = new Map(
+    userStore.users
+      .filter((item) => !item.disabled)
+      .map((item) => [item.username, safeText(item.displayName) || item.username]),
+  );
+
+  const counter = new Map();
+  let totalQueries = 0;
+
+  for (const item of filteredEvents) {
+    const username = safeText(item.username);
+    const count = Math.max(1, Number(item.count) || 1);
+    if (!username) continue;
+    counter.set(username, (counter.get(username) || 0) + count);
+    totalQueries += count;
+  }
+
+  const users = [...counter.entries()]
+    .map(([username, count]) => ({
+      username,
+      displayName: displayNameMap.get(username) || username,
+      count,
+      ratio: totalQueries > 0 ? count / totalQueries : 0,
+    }))
+    .sort((a, b) => b.count - a.count || a.username.localeCompare(b.username));
+
+  return {
+    from: fromDate ? fromDate.toISOString() : "",
+    to: toDate ? toDate.toISOString() : "",
+    totalQueries,
+    userCount: users.length,
+    users,
+    serverTime: nowIso(),
+  };
+}
+
 const server = http.createServer(async (req, res) => {
   if (req.method === "OPTIONS") {
     res.writeHead(204, {
@@ -572,6 +704,49 @@ const server = http.createServer(async (req, res) => {
       sendJson(res, 200, { ok: true, profile: getPublicProfile(session.username) });
     } catch (err) {
       sendText(res, 500, err.message || "更新头像失败");
+    }
+    return;
+  }
+
+  if (req.method === "POST" && pathname === "/api/gpt/usage") {
+    const token = extractBearer(req);
+    const session = resolveSessionByToken(token);
+    if (!session) {
+      sendText(res, 401, "未授权");
+      return;
+    }
+
+    try {
+      const body = await readBody(req, 32 * 1024);
+      const payload = safeParseJson(body) || {};
+      const count = Math.max(1, Math.min(20, Number.parseInt(String(payload?.count || "1"), 10) || 1));
+      recordGptUsage(session.username, count);
+
+      sendJson(res, 200, {
+        ok: true,
+        username: session.username,
+        count,
+        recordedAt: nowIso(),
+      });
+    } catch (err) {
+      sendText(res, 500, err.message || "记录 GPT 使用次数失败");
+    }
+    return;
+  }
+
+  if (req.method === "GET" && pathname === "/api/gpt/stats") {
+    const token = extractBearer(req);
+    const session = resolveSessionByToken(token);
+    if (!session) {
+      sendText(res, 401, "未授权");
+      return;
+    }
+
+    try {
+      const stats = buildGptUsageStats(reqUrl.searchParams.get("from"), reqUrl.searchParams.get("to"));
+      sendJson(res, 200, stats);
+    } catch (err) {
+      sendText(res, 400, err.message || "查询 GPT 使用统计失败");
     }
     return;
   }

@@ -1,5 +1,5 @@
 const path = require("node:path");
-const { app, BrowserWindow, ipcMain } = require("electron");
+const { app, BrowserWindow, ipcMain, shell, session } = require("electron");
 const { Backend } = require("./backend");
 
 function getEventWindow(event, fallbackWindow) {
@@ -46,6 +46,7 @@ function createElectronApp(baseMode = "all") {
         contextIsolation: true,
         nodeIntegration: false,
         sandbox: false,
+        webviewTag: true,
       },
     });
 
@@ -67,6 +68,33 @@ function createElectronApp(baseMode = "all") {
     ipcMain.handle("app:paths", () => backend.getPaths());
     ipcMain.handle("app:device-info", () => backend.getDeviceInfo());
     ipcMain.handle("app:mode", () => appMode);
+    ipcMain.handle("shell:open-external", async (_event, rawUrl) => {
+      const url = String(rawUrl || "").trim();
+      if (!url) return false;
+      await shell.openExternal(url);
+      return true;
+    });
+    ipcMain.handle("gpt:configure-session", async (_event, payload) => {
+      const partition = String(payload?.partition || "persist:gpt-chat").trim() || "persist:gpt-chat";
+      const host = String(payload?.host || "127.0.0.1").trim() || "127.0.0.1";
+      const port = Number.parseInt(String(payload?.port || "19872"), 10);
+
+      if (!Number.isInteger(port) || port < 1 || port > 65535) {
+        throw new Error("GPT 代理端口不合法");
+      }
+
+      const targetSession = session.fromPartition(partition);
+      await targetSession.setProxy({
+        proxyRules: `socks5://${host}:${port}`,
+        proxyBypassRules: "",
+      });
+
+      return {
+        ok: true,
+        partition,
+        proxy: `socks5://${host}:${port}`,
+      };
+    });
 
     ipcMain.handle("profile:open", (_event, payload) => {
       if (profileWindow && !profileWindow.isDestroyed()) {
@@ -91,6 +119,7 @@ function createElectronApp(baseMode = "all") {
           contextIsolation: true,
           nodeIntegration: false,
           sandbox: false,
+          webviewTag: true,
         },
       });
 

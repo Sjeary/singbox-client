@@ -40,7 +40,23 @@ const DEFAULT_SETTINGS = {
     server_url: "http://47.113.226.118:8088",
     last_username: "demo_user",
     last_avatar: "",
+    remember_password: false,
+    saved_password: "",
+    notify_message_popup: true,
+    notify_user_online: false,
     pinned_users: [],
+  },
+  gpt: {
+    partition: "persist:gpt-chat",
+    home_url: "https://chatgpt.com/",
+    last_url: "https://chatgpt.com/",
+    proxy_host: "127.0.0.1",
+    proxy_port: "19872",
+    total_queries: 0,
+    query_users: {},
+    stats_preset: "30d",
+    stats_from: "",
+    stats_to: "",
   },
 };
 
@@ -121,6 +137,7 @@ class Backend {
         sender: { ...DEFAULT_SETTINGS.sender, ...(raw.sender || {}) },
         receiver: { ...DEFAULT_SETTINGS.receiver, ...(raw.receiver || {}) },
         collab: { ...DEFAULT_SETTINGS.collab, ...(raw.collab || {}) },
+        gpt: { ...DEFAULT_SETTINGS.gpt, ...(raw.gpt || {}) },
       };
     } catch {
       return structuredClone(DEFAULT_SETTINGS);
@@ -132,6 +149,7 @@ class Backend {
       sender: { ...DEFAULT_SETTINGS.sender, ...(data.sender || {}) },
       receiver: { ...DEFAULT_SETTINGS.receiver, ...(data.receiver || {}) },
       collab: { ...DEFAULT_SETTINGS.collab, ...(data.collab || {}) },
+      gpt: { ...DEFAULT_SETTINGS.gpt, ...(data.gpt || {}) },
     };
     fs.writeFileSync(this.settingsFile, JSON.stringify(merged, null, 2), "utf-8");
     return merged;

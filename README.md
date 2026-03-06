@@ -96,6 +96,7 @@ npm run dev:receiver
 - `连接设置`
 - `运行记录`
 - `账号与信息`
+- `GPT 工作区`
 - `联系人与聊天`
 
 未登录时只显示登录页。
@@ -168,6 +169,12 @@ http://你的服务器IP:8088
 
 更完整的部署说明见：
 - `collab_server/README.md`
+
+## GPT 功能说明
+### GPT 工作区
+- 使用 Electron 内嵌 Chromium 打开 ChatGPT 网页
+- 走本地 `sing-box` 代理
+- 适合保留你自己的网页会话
 
 ## Git 工作流
 ### 查看状态
