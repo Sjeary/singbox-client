@@ -1,0 +1,40 @@
+{
+  "appId": "com.sjr12.singbox.desktop.sender",
+  "productName": "SingBox 发送端",
+  "asar": true,
+  "files": [
+    "src/**/*",
+    "package.json"
+  ],
+  "extraResources": [
+    {
+      "from": "build/bin",
+      "to": "bin",
+      "filter": [
+        "**/*"
+      ]
+    }
+  ],
+  "directories": {
+    "output": "release_sender"
+  },
+  "win": {
+    "target": [
+      "portable"
+    ],
+    "artifactName": "singbox-sender-${version}.${ext}",
+    "executableName": "singbox_sender",
+    "signAndEditExecutable": false
+  },
+  "mac": {
+    "target": [
+      "zip",
+      "dmg"
+    ],
+    "artifactName": "singbox-sender-${version}-${arch}.${ext}"
+  },
+  "extraMetadata": {
+    "main": "src/main/main_sender.js",
+    "name": "singbox-sender-desktop"
+  }
+}

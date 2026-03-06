@@ -1,0 +1,372 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>网络连接助手</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar glass" id="appTitlebar">
+        <div class="brand-block">
+          <h1 id="topViewTitle">连接设置</h1>
+          <p id="subTitle">填写连接信息后，可开启发送端，让需要的网站通过这台设备访问。</p>
+        </div>
+
+        <div class="status-ribbon no-drag">
+          <div class="status-pill sender-status">
+            <span class="status-dot" id="senderDot"></span>
+            <div class="status-copy">
+              <span>发送服务</span>
+              <strong id="senderState">发送服务：未开启</strong>
+            </div>
+          </div>
+
+          <div class="status-pill receiver-status">
+            <span class="status-dot" id="receiverDot"></span>
+            <div class="status-copy">
+              <span>接收服务</span>
+              <strong id="receiverState">接收服务：未开启</strong>
+            </div>
+          </div>
+        </div>
+
+        <div class="top-collab-user no-drag" id="topCollabIdentity" title="点击查看更多操作">
+          <span class="top-collab-avatar" id="topCollabAvatar">?</span>
+          <div class="top-collab-meta">
+            <strong id="topCollabName">未登录</strong>
+            <span id="topCollabSub">登录后可查看账号信息</span>
+          </div>
+        </div>
+
+        <div class="window-controls no-drag">
+          <button class="win-btn win-btn-min" id="btnWinMin" title="最小化" aria-label="最小化"></button>
+          <button class="win-btn win-btn-max" id="btnWinMax" title="最大化" aria-label="最大化"></button>
+          <button class="win-btn win-btn-close danger" id="btnWinClose" title="关闭" aria-label="关闭"></button>
+        </div>
+      </header>
+
+      <main class="workspace">
+        <div class="workspace-shell">
+          <div class="content-stack">
+            <section class="panel glass view-panel service-panel" id="senderPanel" data-view-panel="sender">
+              <div class="panel-header">
+                <p>填写连接信息后，可开启发送端，让需要的网站通过这台设备访问。</p>
+              </div>
+
+              <div class="form-grid">
+                <label>
+                  <span>服务器地址</span>
+                  <input id="s_proxy_server" placeholder="例如 203.0.113.10 或 demo.example.com" />
+                </label>
+
+                <label>
+                  <span>连接端口</span>
+                  <input id="s_proxy_port" placeholder="例如 443" />
+                </label>
+
+                <label>
+                  <span>连接身份码</span>
+                  <input id="s_proxy_uuid" placeholder="请输入连接身份码" />
+                </label>
+
+                <label>
+                  <span>本地代理端口</span>
+                  <input id="s_socks_listen_port" placeholder="例如 1080" />
+                </label>
+
+                <label>
+                  <span>其他网站访问方式</span>
+                  <select id="s_fallback_mode">
+                    <option value="system_proxy">通过本机代理访问</option>
+                    <option value="direct">直接访问</option>
+                  </select>
+                </label>
+
+                <label id="fallbackPortWrap">
+                  <span>本机已有代理端口</span>
+                  <input id="s_fallback_local_port" placeholder="例如 7890" />
+                </label>
+              </div>
+
+              <label class="full-width locked-field" id="targetDomainsWrap">
+                <span>固定走连接的网站</span>
+                <textarea id="s_target_domains" rows="4" readonly></textarea>
+              </label>
+
+              <div class="panel-footer">
+                <p class="auth-hint" id="senderAuthHint">请先登录账号，登录后才能开启发送服务。</p>
+
+                <div class="actions">
+                  <button class="primary" id="btnStartSender">开启发送服务</button>
+                  <button id="btnStopSender">停止发送服务</button>
+                  <button id="btnSaveSender">保存连接设置</button>
+                </div>
+
+                <p class="panel-feedback" id="s_feedback" hidden></p>
+              </div>
+            </section>
+
+            <section class="panel glass view-panel service-panel" id="receiverPanel" data-view-panel="receiver">
+              <div class="panel-header">
+                <p>接收端用于另一台设备上的连接接收和转发，请按服务端提供的信息填写。</p>
+              </div>
+
+              <div class="form-grid">
+                <label>
+                  <span>服务端地址</span>
+                  <input id="r_frps_server" placeholder="例如 server.example.com" />
+                </label>
+
+                <label>
+                  <span>服务端端口</span>
+                  <input id="r_frps_port" placeholder="例如 7000" />
+                </label>
+
+                <label>
+                  <span>连接口令</span>
+                  <input id="r_frps_token" placeholder="请输入连接口令" />
+                </label>
+
+                <label>
+                  <span>外部访问端口</span>
+                  <input id="r_remote_port" placeholder="例如 6001" />
+                </label>
+
+                <label>
+                  <span>本地接收端口</span>
+                  <input id="r_vmess_listen_port" placeholder="例如 10086" />
+                </label>
+
+                <label>
+                  <span>接收身份码</span>
+                  <input id="r_vmess_uuid" placeholder="请输入接收身份码" />
+                </label>
+
+                <label class="wide-field">
+                  <span>转发到本机端口</span>
+                  <input id="r_forward_proxy_port" placeholder="例如 7890" />
+                </label>
+              </div>
+
+              <div class="checks">
+                <label class="toggle-chip"><input type="checkbox" id="r_tls_enable" /> 使用安全连接</label>
+                <label class="toggle-chip"><input type="checkbox" id="r_use_compression" /> 传输时压缩数据</label>
+                <label class="toggle-chip"><input type="checkbox" id="r_use_encryption" /> 传输时加密数据</label>
+              </div>
+
+              <div class="panel-footer">
+                <div class="actions">
+                  <button class="primary" id="btnStartReceiver">开启接收服务</button>
+                  <button id="btnStopReceiver">停止接收服务</button>
+                  <button id="btnSaveReceiver">保存接收端设置</button>
+                </div>
+
+                <p class="panel-feedback" id="r_feedback" hidden></p>
+              </div>
+            </section>
+
+            <section class="panel glass view-panel log-panel" id="logPanel" data-view-panel="logs">
+              <div class="panel-header">
+                <p>这里会显示程序的运行状态，方便确认连接是否已经启动、停止或出现异常。</p>
+                <button id="btnClearLog">清空日志</button>
+              </div>
+
+              <div class="log-dashboard">
+                <section class="ops-log-card">
+                  <h3>程序记录</h3>
+                  <pre id="logBox"></pre>
+                </section>
+
+                <section class="receiver-log-card receiver-only">
+                  <h3>接收记录（连接核心）</h3>
+                  <pre id="receiverSingboxLog"></pre>
+                </section>
+
+                <section class="receiver-log-card receiver-only">
+                  <h3>接收记录（端口映射）</h3>
+                  <pre id="receiverFrpcLog"></pre>
+                </section>
+              </div>
+            </section>
+
+            <section class="panel glass view-panel account-panel" id="accountPanel" data-view-panel="account">
+              <div class="panel-header">
+                <p>在这里登录账号、查看当前状态，并管理你的显示资料。</p>
+              </div>
+
+              <section class="collab-auth-intro">
+                <h3>请先登录账号</h3>
+                <p>登录成功后，才能进入发送端主界面并使用连接设置、运行记录和消息功能。</p>
+              </section>
+
+              <div class="collab-summary">
+                <article class="summary-card">
+                  <span class="summary-label">当前状态</span>
+                  <strong id="c_conn_state">未登录</strong>
+                </article>
+
+                <article class="summary-card">
+                  <span class="summary-label">当前房间</span>
+                  <strong id="c_room_scope">-</strong>
+                </article>
+
+                <article class="summary-card">
+                  <span class="summary-label">本机信息</span>
+                  <strong id="c_local_info">-</strong>
+                </article>
+              </div>
+
+              <div class="collab-login-block">
+                <div class="collab-form-row">
+                  <label>
+                    <span>服务地址</span>
+                    <input id="c_server_url" placeholder="http://47.113.226.118:8088" />
+                  </label>
+                </div>
+
+                <div class="collab-form-row two">
+                  <label>
+                    <span>账号</span>
+                    <input id="c_username" placeholder="请输入协作账号" />
+                  </label>
+
+                  <label>
+                    <span>密码</span>
+                    <input id="c_password" type="password" placeholder="请输入协作密码" />
+                  </label>
+                </div>
+
+                <div class="actions collab-actions">
+                  <button class="primary" id="btnCollabLogin">登录</button>
+                  <button id="btnCollabLogout">退出</button>
+                </div>
+
+                <p class="collab-feedback" id="c_feedback" hidden></p>
+              </div>
+
+              <div class="account-layout">
+                <aside class="account-side">
+                  <article class="account-card">
+                    <div class="account-card-head">
+                      <span class="account-avatar" id="c_account_avatar">?</span>
+                      <div class="account-meta">
+                        <strong id="c_account_name">未登录</strong>
+                        <span id="c_account_meta">登录后可查看账号信息</span>
+                      </div>
+                    </div>
+
+                    <p class="account-note" id="c_account_note">登录成功后，可以修改昵称、头像和简介，让联系人更容易识别你。</p>
+
+                    <div class="actions account-actions">
+                      <button id="btnAccountProfile">修改个人资料</button>
+                      <button id="btnAccountLogout">退出登录</button>
+                    </div>
+                  </article>
+
+                  <article class="account-tip-card">
+                    <h3>使用说明</h3>
+                    <div class="account-tip-list">
+                      <div class="tip-item">登录后，右上角会显示你的当前账号和在线状态。</div>
+                      <div class="tip-item">修改个人资料后，联系人列表和聊天消息会立即同步显示。</div>
+                      <div class="tip-item">联系人与聊天已经单独放到右侧的新页面里，便于集中查看消息。</div>
+                    </div>
+                  </article>
+                </aside>
+              </div>
+            </section>
+
+            <section class="panel glass view-panel chat-panel" id="chatPanel" data-view-panel="chat">
+              <div class="panel-header">
+                <p>左侧选择当前房间或联系人，右侧查看消息并继续聊天。</p>
+              </div>
+
+              <div class="chat-layout">
+                <aside class="chat-sidebar">
+                  <button class="chat-room-card active" id="c_room_channel" type="button">
+                    <span class="chat-room-icon">#</span>
+                    <div class="chat-room-meta">
+                      <strong>当前房间</strong>
+                      <span id="c_room_channel_scope">房间：-</span>
+                    </div>
+                  </button>
+
+                  <div class="chat-list-head">
+                    <span>在线联系人</span>
+                    <small id="c_online_count">0 人</small>
+                  </div>
+
+                  <ul id="c_online_list"></ul>
+                </aside>
+
+                <section class="chat-stage">
+                  <div class="chat-stage-head">
+                    <div class="chat-stage-copy">
+                      <h3 id="c_chat_title">当前房间</h3>
+                      <p id="c_chat_subtitle">发送给当前房间内的所有在线联系人</p>
+                    </div>
+                    <span class="chat-connection-chip" id="c_chat_status_badge">未连接</span>
+                  </div>
+
+                  <div id="c_chat_box"></div>
+
+                  <div class="chat-compose">
+                    <div class="chat-hidden-controls">
+                      <select id="c_chat_scope">
+                        <option value="subnet">发送到当前房间</option>
+                        <option value="private">发送给单个联系人</option>
+                      </select>
+
+                      <select id="c_chat_target" disabled>
+                        <option value="">请选择联系人</option>
+                      </select>
+                    </div>
+
+                    <p class="panel-feedback" id="chat_feedback" hidden></p>
+
+                    <div class="chat-input-row">
+                      <input id="c_chat_input" placeholder="输入消息，按 Enter 发送" />
+                      <button id="btnChatSend">发送</button>
+                    </div>
+                  </div>
+                </section>
+              </div>
+            </section>
+          </div>
+
+          <aside class="view-menu glass no-drag">
+            <button class="view-nav-btn" data-view-target="sender">
+              <span>连接设置</span>
+              <small>发送端</small>
+            </button>
+
+            <button class="view-nav-btn" data-view-target="receiver">
+              <span>接收端设置</span>
+              <small>接收端</small>
+            </button>
+
+            <button class="view-nav-btn" data-view-target="logs">
+              <span>运行记录</span>
+              <small>状态查看</small>
+            </button>
+
+            <button class="view-nav-btn" data-view-target="account">
+              <span>账号与信息</span>
+              <small>登录与资料</small>
+            </button>
+
+            <button class="view-nav-btn" data-view-target="chat">
+              <span>联系人与聊天</span>
+              <small>会话窗口</small>
+            </button>
+          </aside>
+        </div>
+      </main>
+    </div>
+
+    <div id="appContextMenu" class="app-context-menu" hidden></div>
+
+    <script src="./renderer.js"></script>
+  </body>
+</html>

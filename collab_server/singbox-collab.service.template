@@ -1,0 +1,21 @@
+[Unit]
+Description=SingBox Collaboration Server
+After=network.target
+
+[Service]
+Type=simple
+User=singbox
+Group=singbox
+WorkingDirectory=/opt/singbox-collab
+Environment=NODE_ENV=production
+Environment=PORT=8088
+Environment=HOST=0.0.0.0
+Environment=USERS_FILE=/opt/singbox-collab/data/users.json
+Environment=SESSION_TTL_MS=86400000
+Environment=HISTORY_MAX=200
+ExecStart=/usr/bin/env node server.js
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

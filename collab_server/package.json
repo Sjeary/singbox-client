@@ -1,0 +1,15 @@
+{
+  "name": "singbox-collab-server",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Authentication, online presence and chat server for SingBox desktop console",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js",
+    "add-user": "node add_user.js"
+  },
+  "dependencies": {
+    "ws": "^8.18.3"
+  }
+}

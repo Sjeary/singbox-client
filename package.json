@@ -1,0 +1,65 @@
+{
+  "name": "singbox-wrap-v3-electron",
+  "version": "0.1.0",
+  "description": "Sing-box + FRPC Desktop Control Center",
+  "main": "src/main/main.js",
+  "author": "sjr12",
+  "license": "UNLICENSED",
+  "scripts": {
+    "prepare:assets": "node scripts/prepare-assets.mjs",
+    "dev": "node scripts/prepare-assets.mjs && electron .",
+    "dev:sender": "node scripts/prepare-assets.mjs && electron . --mode=sender",
+    "dev:receiver": "node scripts/prepare-assets.mjs && electron . --mode=receiver",
+    "dist:win": "node scripts/prepare-assets.mjs && electron-builder --win portable",
+    "dist:win:sender": "node scripts/prepare-assets.mjs && electron-builder --win portable --config build.sender.json",
+    "dist:win:receiver": "node scripts/prepare-assets.mjs && electron-builder --win portable --config build.receiver.json",
+    "dist:win:split": "node scripts/prepare-assets.mjs && electron-builder --win portable --config build.sender.json && electron-builder --win portable --config build.receiver.json",
+    "dist:win:installer": "node scripts/prepare-assets.mjs && electron-builder --win nsis",
+    "dist:mac": "node scripts/prepare-assets.mjs && electron-builder --mac dmg",
+    "dist:mac:sender": "node scripts/prepare-assets.mjs && electron-builder --mac zip --config build.sender.json",
+    "dist:mac:sender:dmg": "node scripts/prepare-assets.mjs && electron-builder --mac dmg --config build.sender.json",
+    "dist:linux": "node scripts/prepare-assets.mjs && electron-builder --linux AppImage"
+  },
+  "devDependencies": {
+    "electron": "^31.7.7",
+    "electron-builder": "^24.13.3"
+  },
+  "build": {
+    "appId": "com.sjr12.singbox.desktop",
+    "productName": "SingBox 桌面控制台",
+    "asar": true,
+    "files": [
+      "src/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "build/bin",
+        "to": "bin",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ],
+    "directories": {
+      "output": "release"
+    },
+    "win": {
+      "target": [
+        "portable"
+      ],
+      "signAndEditExecutable": false
+    },
+    "mac": {
+      "target": [
+        "dmg"
+      ]
+    },
+    "linux": {
+      "target": [
+        "AppImage"
+      ],
+      "category": "Network"
+    }
+  }
+}

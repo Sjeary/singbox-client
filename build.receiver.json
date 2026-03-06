@@ -1,0 +1,33 @@
+{
+  "appId": "com.sjr12.singbox.desktop.receiver",
+  "productName": "SingBox 接收端",
+  "asar": true,
+  "files": [
+    "src/**/*",
+    "package.json"
+  ],
+  "extraResources": [
+    {
+      "from": "build/bin",
+      "to": "bin",
+      "filter": [
+        "**/*"
+      ]
+    }
+  ],
+  "directories": {
+    "output": "release_receiver"
+  },
+  "win": {
+    "target": [
+      "portable"
+    ],
+    "artifactName": "singbox-receiver-${version}.${ext}",
+    "executableName": "singbox_receiver",
+    "signAndEditExecutable": false
+  },
+  "extraMetadata": {
+    "main": "src/main/main_receiver.js",
+    "name": "singbox-receiver-desktop"
+  }
+}
