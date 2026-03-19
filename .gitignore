@@ -8,3 +8,4 @@ collab_server/data/
 collab_server.zip
 private.defaults.local.json
 .cache/
+.DS_Store
