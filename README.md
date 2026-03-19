@@ -126,11 +126,13 @@ npm run dist:mac:sender
 - macOS 版本不包含 Receiver
 - macOS Sender 不要求 `frpc`
 - 仓库内已放置 macOS 所需的 `sing-box`
+- `build_mac_sender.sh` 会自动补充常见 Homebrew Node 路径，并把 Electron 缓存写到仓库内 `.cache/`
 
 ## 运行环境
 - Node.js 20+
 - npm 10+ 推荐
 - Windows 优先
+- macOS 当前以 Sender 构建和运行为主
 
 ## 从源码运行
 ### 安装依赖
@@ -206,7 +208,7 @@ http://server.example.com:8088
 
 ```bash
 git clone git@github.com:Sjeary/singbox-client.git
-cd singbox-client/v3_electron
+cd singbox-client
 ```
 
 查看状态：

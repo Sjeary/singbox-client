@@ -73,6 +73,12 @@ function isWindows() {
   return process.platform === "win32";
 }
 
+function currentPlatformDir() {
+  if (process.platform === "darwin") return "macos";
+  if (process.platform === "win32") return "windows";
+  return "linux";
+}
+
 function binaryName(stem) {
   return isWindows() ? `${stem}.exe` : stem;
 }
@@ -100,7 +106,8 @@ class Backend {
   }
 
   resolvePrivateDefaultsCandidates() {
-    const workspaceRoot = path.resolve(__dirname, "../../..");
+    const repoRoot = path.resolve(__dirname, "../..");
+    const workspaceRoot = path.resolve(repoRoot, "..");
     const appDir = path.dirname(this.app.getPath("exe"));
     const userDataFile = path.join(this.app.getPath("userData"), "private.defaults.local.json");
 
@@ -112,6 +119,7 @@ class Backend {
     }
 
     return [
+      path.join(repoRoot, "private.defaults.local.json"),
       path.join(workspaceRoot, "v3_electron", "private.defaults.local.json"),
       userDataFile,
     ];
@@ -144,14 +152,31 @@ class Backend {
 
   resolveBinary(stem) {
     const filename = binaryName(stem);
-    const workspaceRoot = path.resolve(__dirname, "../../..");
+    const repoRoot = path.resolve(__dirname, "../..");
+    const workspaceRoot = path.resolve(repoRoot, "..");
+    const platformDir = currentPlatformDir();
+    const fallbackCandidates = [];
+
+    if (process.platform === "darwin" && stem === "sing-box") {
+      fallbackCandidates.push(path.join(workspaceRoot, "sing-box-1.12.17-darwin-arm64", filename));
+    }
+
+    if (process.platform === "linux" && stem === "sing-box") {
+      fallbackCandidates.push(path.join(workspaceRoot, "frp_0.65.0_linux_amd64", "sing-box-linux"));
+    }
+
+    if (process.platform === "win32") {
+      fallbackCandidates.push(path.join(workspaceRoot, "frp_0.65.0_windows_amd64", filename));
+    }
 
     const candidates = this.app.isPackaged
       ? [path.join(process.resourcesPath, "bin", filename)]
       : [
+          path.join(repoRoot, "build", "bin", filename),
+          path.join(workspaceRoot, "v2", "assets", platformDir, filename),
+          path.join(repoRoot, "..", "v2", "assets", platformDir, filename),
           path.join(workspaceRoot, "v3_electron", "build", "bin", filename),
-          path.join(workspaceRoot, "v2", "assets", "windows", filename),
-          path.join(workspaceRoot, "frp_0.65.0_windows_amd64", filename),
+          ...fallbackCandidates,
           path.join(workspaceRoot, filename),
         ];
 

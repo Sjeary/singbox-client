@@ -44,14 +44,20 @@ function candidates(fileName) {
     extra.push(path.join(workspaceRoot, "frp_0.65.0_linux_amd64", "sing-box-linux"));
   }
 
-  return [
+  const list = [
     path.join(outputDir, fileName),
+    path.join(projectRoot, "build", "bin", fileName),
     path.join(workspaceRoot, "v2", "assets", platform, fileName),
     path.join(projectRoot, "..", "v2", "assets", platform, fileName),
     ...extra,
-    path.join(workspaceRoot, "frp_0.65.0_windows_amd64", fileName),
     path.join(workspaceRoot, fileName),
   ];
+
+  if (platform === "windows") {
+    list.push(path.join(workspaceRoot, "frp_0.65.0_windows_amd64", fileName));
+  }
+
+  return list;
 }
 
 async function copyOne(label, fileName) {
@@ -75,7 +81,9 @@ async function copyOne(label, fileName) {
     }
   }
 
-  throw new Error(`未找到 ${label} 二进制: ${fileName}。请放到 v2/assets/${platform}/`);
+  throw new Error(
+    `未找到 ${label} 二进制: ${fileName}。请放到 build/bin/ 或 v2/assets/${platform}/`,
+  );
 }
 
 async function main() {

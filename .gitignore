@@ -7,3 +7,4 @@ collab_server/node_modules/
 collab_server/data/
 collab_server.zip
 private.defaults.local.json
+.cache/
