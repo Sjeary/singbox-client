@@ -1,7 +1,7 @@
 {
   "name": "chatportal-x1-desktop",
   "version": "0.6.0",
-  "description": "Windows desktop client with built-in messaging and embedded ChatGPT web access.",
+  "description": "Desktop client with built-in messaging and embedded ChatGPT web access.",
   "main": "src/main/main.js",
   "author": "Sjeary",
   "license": "UNLICENSED",
@@ -32,7 +32,7 @@
     "dist:win:split": "node scripts/prepare-assets.mjs && electron-builder --win portable --config build.sender.json && electron-builder --win portable --config build.receiver.json",
     "dist:win:installer": "node scripts/prepare-assets.mjs && electron-builder --win nsis",
     "dist:mac": "node scripts/prepare-assets.mjs && electron-builder --mac dmg",
-    "dist:mac:sender": "node scripts/prepare-assets.mjs && electron-builder --mac zip --config build.sender.json",
+    "dist:mac:sender": "node scripts/prepare-assets.mjs && electron-builder --mac --config build.sender.json",
     "dist:mac:sender:dmg": "node scripts/prepare-assets.mjs && electron-builder --mac dmg --config build.sender.json",
     "dist:linux": "node scripts/prepare-assets.mjs && electron-builder --linux AppImage"
   },

@@ -14,4 +14,4 @@ fi
 
 npm run dist:mac:sender
 
-echo "mac sender 打包完成，请查看 release_sender 目录"
+echo "macOS Sender 打包完成，请查看 release_sender 目录"

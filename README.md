@@ -1,6 +1,6 @@
 # ChatPortal X1
 
-ChatPortal X1 是一个面向 Windows 的桌面客户端，集成了联系人聊天、房间消息和内置 ChatGPT 网页，并提供 Sender / Receiver 两种运行模式。
+ChatPortal X1 是一个桌面客户端，集成了联系人聊天、房间消息和内置 ChatGPT 网页，并提供 Sender / Receiver 两种运行模式。
 
 ## 功能
 - Sender / Receiver 双模式
@@ -10,7 +10,7 @@ ChatPortal X1 是一个面向 Windows 的桌面客户端，集成了联系人聊
 - Windows 便携打包
 
 ## 下载
-Windows 发行版发布位置：
+发行版发布位置：
 
 ```text
 https://github.com/Sjeary/singbox-client/releases
@@ -20,6 +20,8 @@ https://github.com/Sjeary/singbox-client/releases
 - `chatportal-x1-sender-<version>.exe`
 - `chatportal-x1-receiver-<version>.exe`
 - `chatportal-x1-<version>.exe`
+- `chatportal-x1-sender-<version>-arm64.dmg`
+- `chatportal-x1-sender-<version>-arm64.zip`
 
 ## Windows 使用
 ### Sender
@@ -93,6 +95,38 @@ GitHub Release 文件：
 - `release_receiver/chatportal-x1-receiver-<version>.exe`
 - `release/chatportal-x1-<version>.exe`
 
+## macOS 打包
+当前只支持 Sender。
+
+前提：
+- macOS
+- Node.js 20+
+- Apple Silicon
+
+命令：
+
+```bash
+npm run dist:mac:sender
+```
+
+或：
+
+```bash
+./build_mac_sender.sh
+```
+
+输出目录：
+- `release_sender/`
+
+常用发行文件：
+- `release_sender/chatportal-x1-sender-<version>-arm64.dmg`
+- `release_sender/chatportal-x1-sender-<version>-arm64.zip`
+
+说明：
+- macOS 版本不包含 Receiver
+- macOS Sender 不要求 `frpc`
+- 仓库内已放置 macOS 所需的 `sing-box`
+
 ## 运行环境
 - Node.js 20+
 - npm 10+ 推荐
@@ -142,7 +176,7 @@ npm run dev:receiver
   - Electron 主进程、预加载脚本、页面和样式
 - `build/bin/`
   - 运行依赖二进制
-  - 包含 `sing-box.exe`、`frpc.exe`
+  - 包含 Windows 所需二进制和 macOS Sender 所需 `sing-box`
 - `scripts/prepare-assets.mjs`
   - 启动和打包前整理运行资源
 - `collab_server/`

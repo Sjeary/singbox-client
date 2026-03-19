@@ -31,10 +31,24 @@ async function exists(filePath) {
 }
 
 function candidates(fileName) {
+  const extra = [];
+
+  if (platform === "macos" && fileName === "sing-box") {
+    extra.push(
+      path.join(workspaceRoot, "sing-box-1.12.17-darwin-arm64", "sing-box"),
+      path.join(workspaceRoot, "frp_0.65.0_linux_amd64", "sing-box-mac"),
+    );
+  }
+
+  if (platform === "linux" && fileName === "sing-box") {
+    extra.push(path.join(workspaceRoot, "frp_0.65.0_linux_amd64", "sing-box-linux"));
+  }
+
   return [
     path.join(outputDir, fileName),
     path.join(workspaceRoot, "v2", "assets", platform, fileName),
     path.join(projectRoot, "..", "v2", "assets", platform, fileName),
+    ...extra,
     path.join(workspaceRoot, "frp_0.65.0_windows_amd64", fileName),
     path.join(workspaceRoot, fileName),
   ];
@@ -46,6 +60,9 @@ async function copyOne(label, fileName) {
   for (const candidate of candidates(fileName)) {
     if (await exists(candidate)) {
       if (path.resolve(candidate) === path.resolve(dest)) {
+        if (!isWindows) {
+          await fs.chmod(dest, 0o755);
+        }
         console.log(`[assets] ${label}: using existing ${dest}`);
         return;
       }
