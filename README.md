@@ -10,7 +10,7 @@ ChatPortal X1 是一个面向 Windows 的桌面客户端，集成了联系人聊
 - Windows 便携打包
 
 ## 下载
-Windows 发行版建议通过 GitHub Releases 提供：
+Windows 发行版发布位置：
 
 ```text
 https://github.com/Sjeary/singbox-client/releases
@@ -88,7 +88,7 @@ npm run dist:win:split
 - `release_sender/`
 - `release_receiver/`
 
-GitHub Release 建议上传：
+GitHub Release 文件：
 - `release_sender/chatportal-x1-sender-<version>.exe`
 - `release_receiver/chatportal-x1-receiver-<version>.exe`
 - `release/chatportal-x1-<version>.exe`
@@ -104,25 +104,23 @@ GitHub Release 建议上传：
 npm install
 ```
 
-## 公开仓库与本地私有配置
-仓库默认不再包含你的私有服务地址、UUID、口令和默认账号信息。
-
-如需在本机保留调试配置，可以使用：
+## 本地私有配置
+本地调试配置文件：
 
 - `private.defaults.local.json`
 
-这个文件不会进入 Git。
+该文件不纳入 Git 版本控制。
 
 模板文件：
 
 - `private.defaults.local.example.json`
 
-使用方式：
+使用方法：
 1. 复制 `private.defaults.local.example.json`
 2. 重命名为 `private.defaults.local.json`
-3. 填入你自己的服务器地址、端口、UUID 和账号
+3. 填入服务器地址、端口、UUID 和账号
 
-程序启动时会优先读取这个本地文件，再读取用户目录中的运行设置。
+程序启动时优先读取本地文件，再读取用户目录中的运行设置。
 
 ### 本地运行
 ```bash
@@ -163,10 +161,10 @@ npm start
 客户端服务地址示例：
 
 ```text
-http://你的服务器IP:8088
+http://server.example.com:8088
 ```
 
-更完整的部署说明见：
+部署说明：
 - `collab_server/README.md`
 
 ## Git
@@ -196,6 +194,6 @@ git commit -m "your message"
 git push
 ```
 
-## 说明
+## 仓库说明
 - 仓库中保留源码、构建配置和运行所需二进制
 - `node_modules/`、`release*/`、服务端运行数据不会进入 Git

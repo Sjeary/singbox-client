@@ -55,14 +55,14 @@ npm start
 
 ## 与客户端对接
 在 ChatPortal X1 中填写：
-- 服务地址：`http://你的公网IP:8088`
+- 服务地址：`http://server.example.com:8088`
 - 账号：通过 `add_user.js` 创建
 - 密码：创建时设置
 
 登录成功后会自动建立消息连接。
 
 ## Ubuntu 部署
-建议直接把整个 `collab_server/` 目录复制到服务器。
+部署目录：整个 `collab_server/` 目录。
 
 一键部署：
 
@@ -100,4 +100,4 @@ npm start
 - `data/users.json`
 - `data/gpt_usage.json`
 
-这些文件不建议提交回 Git。
+这些文件不纳入 Git 版本控制。

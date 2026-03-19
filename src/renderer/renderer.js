@@ -139,7 +139,7 @@ function syncAccountOverview() {
   if (!state.collab.token) {
     if (nameNode) nameNode.textContent = "未登录";
     if (metaNode) metaNode.textContent = "登录后可查看账号信息";
-    if (noteNode) noteNode.textContent = "可设置昵称、头像和简介，方便联系人识别你。";
+    if (noteNode) noteNode.textContent = "可设置昵称、头像和简介，便于联系人识别。";
     setAccountAvatar("", "");
     if (btnProfile) btnProfile.disabled = true;
     if (btnLogout) btnLogout.disabled = true;
@@ -959,7 +959,7 @@ function getViewMeta(view) {
         }
       : {
           title: "账号与信息",
-          subtitle: "在这里登录账号、查看状态，并管理你的显示资料。",
+      subtitle: "在这里登录账号、查看状态，并管理账号资料。",
         },
     chat: {
       title: "联系人与聊天",
@@ -971,7 +971,7 @@ function getViewMeta(view) {
     },
     gpt: {
       title: "ChatGPT 网页",
-      subtitle: "在软件内继续你的 ChatGPT 对话，并通过本地代理访问。",
+      subtitle: "在软件内继续 ChatGPT 对话，并通过本地代理访问。",
     },
     "gpt-stats": {
       title: "AI 使用统计",
