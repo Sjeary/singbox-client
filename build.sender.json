@@ -1,0 +1,40 @@
+{
+  "appId": "com.sjeary.chatportalx1.desktop.sender",
+  "productName": "ChatPortal X1 Sender",
+  "asar": true,
+  "files": [
+    "src/**/*",
+    "package.json"
+  ],
+  "extraResources": [
+    {
+      "from": "build/bin",
+      "to": "bin",
+      "filter": [
+        "**/*"
+      ]
+    }
+  ],
+  "directories": {
+    "output": "release_sender"
+  },
+  "win": {
+    "target": [
+      "portable"
+    ],
+    "artifactName": "chatportal-x1-sender-${version}.${ext}",
+    "executableName": "chatportal_x1_sender",
+    "signAndEditExecutable": false
+  },
+  "mac": {
+    "target": [
+      "zip",
+      "dmg"
+    ],
+    "artifactName": "chatportal-x1-sender-${version}-${arch}.${ext}"
+  },
+  "extraMetadata": {
+    "main": "src/main/main_sender.js",
+    "name": "chatportal-x1-sender-desktop"
+  }
+}
