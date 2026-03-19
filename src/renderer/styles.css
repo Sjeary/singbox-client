@@ -598,6 +598,14 @@ button:disabled {
   gap: 12px;
 }
 
+body[data-mode="receiver"] .log-dashboard {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+body[data-mode="receiver"] .ops-log-card {
+  grid-column: 1 / -1;
+}
+
 .ops-log-card,
 .receiver-log-card,
 .online-card,
@@ -637,11 +645,16 @@ button:disabled {
   font-family: Consolas, "Cascadia Mono", "JetBrains Mono", monospace;
 }
 
+.service-summary-grid,
 .collab-summary {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 10px;
   margin-bottom: 12px;
+}
+
+.receiver-overview {
+  margin-bottom: 14px;
 }
 
 .collab-auth-intro {
@@ -1969,6 +1982,7 @@ body[data-mode="receiver"] #gptStatsPanel {
 
 @media (max-width: 860px) {
   .form-grid,
+  .service-summary-grid,
   .collab-summary,
   .gpt-summary,
   .gpt-range-fields,
@@ -1980,6 +1994,10 @@ body[data-mode="receiver"] #gptStatsPanel {
 
   .option-row {
     align-items: flex-start;
+  }
+
+  body[data-mode="receiver"] .log-dashboard {
+    grid-template-columns: 1fr;
   }
 
   .wide-field {

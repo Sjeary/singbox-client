@@ -110,7 +110,24 @@
 
             <section class="panel glass view-panel service-panel" id="receiverPanel" data-view-panel="receiver">
               <div class="panel-header">
-                <p>接收端用于另一台设备上的连接接收和转发，请按服务端提供的信息填写。</p>
+                <p>填写接收端信息后，可在当前设备开启接收服务，让另一台设备的连接通过这里完成接收和转发。</p>
+              </div>
+
+              <div class="service-summary-grid receiver-overview">
+                <article class="summary-card">
+                  <span class="summary-label">当前状态</span>
+                  <strong id="receiverOverviewState">未开启</strong>
+                </article>
+
+                <article class="summary-card">
+                  <span class="summary-label">外部访问端口</span>
+                  <strong id="receiverOverviewRemote">未填写</strong>
+                </article>
+
+                <article class="summary-card">
+                  <span class="summary-label">转发到本机</span>
+                  <strong id="receiverOverviewForward">未填写</strong>
+                </article>
               </div>
 
               <div class="form-grid">

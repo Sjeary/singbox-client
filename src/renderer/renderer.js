@@ -939,6 +939,7 @@ function appendToReceiverSplit(source, line) {
 
 function getViewMeta(view) {
   const guest = state.mode === "sender" && !state.collab.token;
+  const receiverMode = state.mode === "receiver";
   const viewMeta = {
     sender: {
       title: "连接设置",
@@ -946,11 +947,13 @@ function getViewMeta(view) {
     },
     receiver: {
       title: "接收端设置",
-      subtitle: "接收端用于另一台设备上的连接接收和转发，请按服务端提供的信息填写。",
+      subtitle: "填写接收端信息后，可在当前设备开启接收服务，让另一台设备的连接通过这里完成接收和转发。",
     },
     logs: {
       title: "运行记录",
-      subtitle: "这里会显示运行状态，方便查看启动、停止和异常信息。",
+      subtitle: receiverMode
+        ? "这里会显示接收服务、连接核心和端口映射的运行状态。"
+        : "这里会显示运行状态，方便查看启动、停止和异常信息。",
     },
     account: guest
       ? {
@@ -1073,6 +1076,24 @@ function refreshSenderAccess() {
   }
 }
 
+function syncReceiverOverview() {
+  const receiverRunning = Boolean(state.status?.receiverFrpcRunning || state.status?.receiverSingboxRunning);
+  const remotePort = safeText(el("r_remote_port")?.value);
+  const forwardPort = safeText(el("r_forward_proxy_port")?.value);
+
+  if (el("receiverOverviewState")) {
+    el("receiverOverviewState").textContent = receiverRunning ? "运行中" : "未开启";
+  }
+
+  if (el("receiverOverviewRemote")) {
+    el("receiverOverviewRemote").textContent = remotePort || "未填写";
+  }
+
+  if (el("receiverOverviewForward")) {
+    el("receiverOverviewForward").textContent = forwardPort ? `127.0.0.1:${forwardPort}` : "未填写";
+  }
+}
+
 function setStatus(status) {
   state.status = status;
   const senderRunning = Boolean(status?.senderRunning);
@@ -1088,6 +1109,7 @@ function setStatus(status) {
   if (el("btnStopReceiver")) el("btnStopReceiver").disabled = !receiverRunning;
 
   refreshSenderAccess();
+  syncReceiverOverview();
   updateGptRuntimeState();
 
   if (senderRunning && state.view === "gpt" && !state.gpt.webviewInitialized) {
@@ -1223,6 +1245,7 @@ function fillForm(settings) {
   }
 
   refreshFallbackVisibility();
+  syncReceiverOverview();
   updateGptProxyInfo();
   syncGptStatsFilterInputs();
   syncGptFullscreenState();
@@ -2401,8 +2424,14 @@ async function main() {
 
   if (el("receiverPanel")) {
     el("receiverPanel").querySelectorAll("input, select, textarea").forEach((node) => {
-      node.addEventListener("input", () => clearServiceFeedback("receiver"));
-      node.addEventListener("change", () => clearServiceFeedback("receiver"));
+      node.addEventListener("input", () => {
+        clearServiceFeedback("receiver");
+        syncReceiverOverview();
+      });
+      node.addEventListener("change", () => {
+        clearServiceFeedback("receiver");
+        syncReceiverOverview();
+      });
     });
   }
 
